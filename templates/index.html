@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Team Task Management</title>
+    <link rel="stylesheet" href="https://cdn.replit.com/agent/bootstrap-agent-dark-theme.min.css">
+    <style>
+        body {
+            padding-top: 20px;
+        }
+        .card {
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header class="mb-4">
+            <h1 class="display-4">Team Task Management Dashboard</h1>
+            <p class="lead">Monitor tasks and worker performance</p>
+        </header>
+
+        <div class="row">
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header">
+                        <h5>Recent Tasks</h5>
+                    </div>
+                    <div class="card-body">
+                        <div id="tasks-container">
+                            <p class="text-center">Loading tasks...</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header">
+                        <h5>Worker Performance</h5>
+                    </div>
+                    <div class="card-body">
+                        <div id="workers-container">
+                            <p class="text-center">Loading workers...</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row mt-4">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header">
+                        <h5>Bot Instructions</h5>
+                    </div>
+                    <div class="card-body">
+                        <h6>Admin Commands:</h6>
+                        <ul>
+                            <li><code>/create_task</code> - Create a new task</li>
+                            <li><code>/add_worker</code> - Register a new worker</li>
+                            <li><code>/remove_worker</code> - Unregister a worker</li>
+                            <li><code>/list_workers</code> - View all registered workers</li>
+                            <li><code>/list_tasks</code> - View all tasks</li>
+                            <li><code>/view_stats</code> - View worker performance stats</li>
+                        </ul>
+                        
+                        <h6>Worker Commands:</h6>
+                        <ul>
+                            <li><code>/accept</code> - Accept a task (with task ID)</li>
+                            <li><code>/decline</code> - Decline a task (with task ID)</li>
+                            <li><code>/my_tasks</code> - View your assigned tasks</li>
+                            <li><code>/my_stats</code> - View your performance stats</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Fetch tasks from API
+        fetch('/api/tasks')
+            .then(response => response.json())
+            .then(data => {
+                const tasksContainer = document.getElementById('tasks-container');
+                if (data.length === 0) {
+                    tasksContainer.innerHTML = '<p class="text-center">No tasks found.</p>';
+                    return;
+                }
+                
+                let tasksHtml = '<div class="list-group">';
+                data.forEach(task => {
+                    const status = task.assigned_to ? 'Assigned' : 'Pending';
+                    const statusClass = task.assigned_to ? 'bg-success' : 'bg-warning';
+                    
+                    tasksHtml += `
+                        <div class="list-group-item">
+                            <div class="d-flex w-100 justify-content-between">
+                                <h5 class="mb-1">Task #${task.id}</h5>
+                                <small><span class="badge ${statusClass}">${status}</span></small>
+                            </div>
+                            <p class="mb-1"><strong>Address:</strong> ${task.address}</p>
+                            <p class="mb-1"><strong>Date/Time:</strong> ${task.date} at ${task.time}</p>
+                            <p class="mb-1"><strong>Description:</strong> ${task.description}</p>
+                            ${task.assigned_to ? `<p class="mb-0"><strong>Assigned to:</strong> ${task.assigned_to_name || 'Worker-' + task.assigned_to}</p>` : ''}
+                        </div>
+                    `;
+                });
+                tasksHtml += '</div>';
+                tasksContainer.innerHTML = tasksHtml;
+            })
+            .catch(error => {
+                console.error('Error fetching tasks:', error);
+                document.getElementById('tasks-container').innerHTML = '<p class="text-center text-danger">Error loading tasks.</p>';
+            });
+        
+        // Fetch workers from API
+        fetch('/api/workers')
+            .then(response => response.json())
+            .then(data => {
+                const workersContainer = document.getElementById('workers-container');
+                if (data.length === 0) {
+                    workersContainer.innerHTML = '<p class="text-center">No workers found.</p>';
+                    return;
+                }
+                
+                let workersHtml = '<div class="list-group">';
+                const fetchStatsPromises = data.map(worker => 
+                    fetch(`/api/stats/${worker.id}`)
+                        .then(response => response.json())
+                        .then(stats => ({ worker, stats }))
+                );
+                
+                Promise.all(fetchStatsPromises)
+                    .then(workersWithStats => {
+                        workersWithStats.forEach(({ worker, stats }) => {
+                            workersHtml += `
+                                <div class="list-group-item">
+                                    <div class="d-flex w-100 justify-content-between">
+                                        <h5 class="mb-1">${worker.username}</h5>
+                                        <small>ID: ${worker.id}</small>
+                                    </div>
+                                    <p class="mb-1">Tasks accepted: ${stats.accepted}</p>
+                                    <p class="mb-1">Tasks declined: ${stats.declined}</p>
+                                    <div class="progress">
+                                        <div class="progress-bar bg-success" role="progressbar" style="width: ${stats.acceptance_rate}%" 
+                                            aria-valuenow="${stats.acceptance_rate}" aria-valuemin="0" aria-valuemax="100">
+                                            ${stats.acceptance_rate}%
+                                        </div>
+                                    </div>
+                                    <small class="mt-1 d-block">Acceptance rate</small>
+                                </div>
+                            `;
+                        });
+                        workersHtml += '</div>';
+                        workersContainer.innerHTML = workersHtml;
+                    });
+            })
+            .catch(error => {
+                console.error('Error fetching workers:', error);
+                document.getElementById('workers-container').innerHTML = '<p class="text-center text-danger">Error loading workers.</p>';
+            });
+    </script>
+</body>
+</html>

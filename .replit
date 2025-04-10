@@ -23,6 +23,10 @@ args = "Start application"
 task = "workflow.run"
 args = "Run Bot"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "run_telegram_bot"
+
 [[workflows.workflow]]
 name = "Start application"
 author = "agent"
@@ -52,6 +56,24 @@ task = "packager.installForAll"
 task = "shell.exec"
 args = "python main.py"
 
+[[workflows.workflow]]
+name = "run_telegram_bot"
+author = "agent"
+
+[workflows.workflow.metadata]
+agentRequireRestartOnSave = false
+
+[[workflows.workflow.tasks]]
+task = "packager.installForAll"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "python bot.py"
+
 [[ports]]
 localPort = 5000
 externalPort = 80
+
+[[ports]]
+localPort = 5001
+externalPort = 3000

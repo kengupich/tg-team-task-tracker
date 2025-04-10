@@ -1,36 +1,31 @@
+"""
+Database module for Team Task Management Bot.
+Handles all database operations including creating tasks, managing workers,
+and tracking performance metrics.
+"""
 import sqlite3
-import os
+import logging
 from datetime import datetime
 
-# Database file path
-DB_FILE = "task_manager.db"
+# Set up logging
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
+)
+logger = logging.getLogger(__name__)
 
-def get_connection():
-    """Get a connection to the SQLite database."""
+# Database file
+DB_FILE = "task_management.db"
+
+def init_db():
+    """Initialize database tables if they don't exist."""
     conn = sqlite3.connect(DB_FILE)
-    conn.row_factory = sqlite3.Row  # Access rows by name
-    return conn
-
-def init_database():
-    """Initialize the database with required tables."""
-    conn = get_connection()
     cursor = conn.cursor()
-    
-    # Create admins table
-    cursor.execute('''
-    CREATE TABLE IF NOT EXISTS admins (
-        user_id INTEGER PRIMARY KEY,
-        username TEXT NOT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-    ''')
     
     # Create workers table
     cursor.execute('''
     CREATE TABLE IF NOT EXISTS workers (
-        user_id INTEGER PRIMARY KEY,
-        name TEXT NOT NULL,
-        phone TEXT,
+        id INTEGER PRIMARY KEY,
+        username TEXT NOT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     ''')
@@ -43,255 +38,360 @@ def init_database():
         date TEXT NOT NULL,
         time TEXT NOT NULL,
         description TEXT NOT NULL,
-        status TEXT DEFAULT 'pending',
-        created_by INTEGER,
-        worker_id INTEGER,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (created_by) REFERENCES admins (user_id),
-        FOREIGN KEY (worker_id) REFERENCES workers (user_id)
+        assigned_to INTEGER,
+        FOREIGN KEY (assigned_to) REFERENCES workers(id)
     )
     ''')
     
-    # Create worker_task_responses table to track worker responses
+    # Create worker_responses table to track accepts/declines
     cursor.execute('''
-    CREATE TABLE IF NOT EXISTS worker_task_responses (
+    CREATE TABLE IF NOT EXISTS worker_responses (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         worker_id INTEGER NOT NULL,
         task_id INTEGER NOT NULL,
-        response TEXT NOT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (worker_id) REFERENCES workers (user_id),
-        FOREIGN KEY (task_id) REFERENCES tasks (id),
+        response TEXT NOT NULL,  -- 'accepted' or 'declined'
+        response_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (worker_id) REFERENCES workers(id),
+        FOREIGN KEY (task_id) REFERENCES tasks(id),
         UNIQUE(worker_id, task_id)
     )
     ''')
     
     conn.commit()
     conn.close()
+    logger.info("Database initialized")
 
-def register_admin(user_id, username):
-    """Register a new admin."""
-    conn = get_connection()
+def add_worker(worker_id, username):
+    """
+    Add a new worker to the database.
+    
+    Args:
+        worker_id (int): Telegram user ID of the worker
+        username (str): Username of the worker
+        
+    Returns:
+        bool: True if worker was added, False if worker already exists
+    """
+    conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     
     try:
+        cursor.execute("SELECT id FROM workers WHERE id = ?", (worker_id,))
+        if cursor.fetchone():
+            # Worker already exists
+            conn.close()
+            return False
+        
         cursor.execute(
-            "INSERT INTO admins (user_id, username) VALUES (?, ?)",
-            (user_id, username)
+            "INSERT INTO workers (id, username) VALUES (?, ?)",
+            (worker_id, username)
         )
         conn.commit()
-        return True
-    except sqlite3.IntegrityError:
-        # Admin already exists
-        return False
-    finally:
         conn.close()
-
-def is_admin(user_id):
-    """Check if a user is an admin."""
-    conn = get_connection()
-    cursor = conn.cursor()
-    
-    cursor.execute("SELECT 1 FROM admins WHERE user_id = ?", (user_id,))
-    result = cursor.fetchone()
-    
-    conn.close()
-    return result is not None
-
-def register_worker(user_id, name, phone=None):
-    """Register a new worker."""
-    conn = get_connection()
-    cursor = conn.cursor()
-    
-    try:
-        cursor.execute(
-            "INSERT INTO workers (user_id, name, phone) VALUES (?, ?, ?)",
-            (user_id, name, phone)
-        )
-        conn.commit()
+        logger.info(f"Added worker {username} (ID: {worker_id})")
         return True
-    except sqlite3.IntegrityError:
-        # Update existing worker
-        cursor.execute(
-            "UPDATE workers SET name = ?, phone = ? WHERE user_id = ?",
-            (name, phone, user_id)
-        )
-        conn.commit()
-        return True
-    finally:
-        conn.close()
-
-def is_worker_registered(user_id):
-    """Check if a worker is registered."""
-    conn = get_connection()
-    cursor = conn.cursor()
-    
-    cursor.execute("SELECT 1 FROM workers WHERE user_id = ?", (user_id,))
-    result = cursor.fetchone()
-    
-    conn.close()
-    return result is not None
-
-def list_all_workers():
-    """Get a list of all registered workers."""
-    conn = get_connection()
-    cursor = conn.cursor()
-    
-    cursor.execute("SELECT user_id, name, phone FROM workers")
-    workers = cursor.fetchall()
-    
-    conn.close()
-    return [dict(worker) for worker in workers]
-
-def get_worker_stats():
-    """Get performance statistics for all workers."""
-    conn = get_connection()
-    cursor = conn.cursor()
-    
-    # Get worker information including task statistics
-    cursor.execute('''
-    SELECT 
-        w.user_id,
-        w.name,
-        COUNT(CASE WHEN wtr.response = 'accepted' THEN 1 END) as tasks_accepted,
-        COUNT(CASE WHEN t.status = 'completed' AND t.worker_id = w.user_id THEN 1 END) as tasks_completed,
-        COUNT(CASE WHEN wtr.response = 'declined' THEN 1 END) as tasks_declined
-    FROM workers w
-    LEFT JOIN worker_task_responses wtr ON w.user_id = wtr.worker_id
-    LEFT JOIN tasks t ON t.id = wtr.task_id
-    GROUP BY w.user_id
-    ''')
-    
-    workers = cursor.fetchall()
-    conn.close()
-    
-    # Calculate additional metrics
-    result = []
-    for worker in workers:
-        worker_dict = dict(worker)
-        
-        # Calculate completion rate
-        tasks_accepted = worker_dict['tasks_accepted'] or 0
-        tasks_completed = worker_dict['tasks_completed'] or 0
-        
-        completion_rate = 0
-        if tasks_accepted > 0:
-            completion_rate = round((tasks_completed / tasks_accepted) * 100, 1)
-        
-        worker_dict['completion_rate'] = completion_rate
-        result.append(worker_dict)
-    
-    return result
-
-def create_task_record(address, date, time, description, admin_id):
-    """Create a new task record in the database."""
-    conn = get_connection()
-    cursor = conn.cursor()
-    
-    cursor.execute(
-        "INSERT INTO tasks (address, date, time, description, created_by) VALUES (?, ?, ?, ?, ?)",
-        (address, date, time, description, admin_id)
-    )
-    
-    # Get the ID of the created task
-    task_id = cursor.lastrowid
-    
-    conn.commit()
-    conn.close()
-    
-    return task_id
-
-def list_tasks(status_filter=None):
-    """Get a list of all tasks, optionally filtered by status."""
-    conn = get_connection()
-    cursor = conn.cursor()
-    
-    query = '''
-    SELECT 
-        t.id,
-        t.address,
-        t.date,
-        t.time,
-        t.description,
-        t.status,
-        t.worker_id,
-        w.name as worker_name
-    FROM tasks t
-    LEFT JOIN workers w ON t.worker_id = w.user_id
-    '''
-    
-    params = ()
-    if status_filter:
-        query += " WHERE t.status = ? "
-        params = (status_filter,)
-    
-    query += " ORDER BY t.created_at DESC"
-    
-    cursor.execute(query, params)
-    tasks = cursor.fetchall()
-    
-    conn.close()
-    return [dict(task) for task in tasks]
-
-def get_pending_tasks():
-    """Get a list of pending tasks."""
-    return list_tasks("pending")
-
-def assign_task(task_id, worker_id):
-    """Assign a task to a worker."""
-    conn = get_connection()
-    cursor = conn.cursor()
-    
-    # Check if the task is still pending
-    cursor.execute("SELECT status FROM tasks WHERE id = ?", (task_id,))
-    task = cursor.fetchone()
-    
-    if not task or task['status'] != 'pending':
+    except Exception as e:
+        logger.error(f"Error adding worker: {e}")
         conn.close()
         return False
+
+def remove_worker(worker_id):
+    """
+    Remove a worker from the database.
     
-    # Update the task status and assign to worker
-    cursor.execute(
-        "UPDATE tasks SET status = 'assigned', worker_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-        (worker_id, task_id)
-    )
+    Args:
+        worker_id (int): Telegram user ID of the worker
+        
+    Returns:
+        bool: True if worker was removed, False if worker doesn't exist
+    """
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
     
-    # Record the worker's response
+    try:
+        cursor.execute("SELECT id FROM workers WHERE id = ?", (worker_id,))
+        if not cursor.fetchone():
+            # Worker doesn't exist
+            conn.close()
+            return False
+        
+        cursor.execute("DELETE FROM workers WHERE id = ?", (worker_id,))
+        conn.commit()
+        conn.close()
+        logger.info(f"Removed worker with ID: {worker_id}")
+        return True
+    except Exception as e:
+        logger.error(f"Error removing worker: {e}")
+        conn.close()
+        return False
+
+def get_all_workers():
+    """
+    Get all registered workers.
+    
+    Returns:
+        list: List of dictionaries containing worker information
+    """
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    
+    try:
+        cursor.execute("SELECT id, username FROM workers")
+        workers = [{"id": row[0], "username": row[1]} for row in cursor.fetchall()]
+        conn.close()
+        return workers
+    except Exception as e:
+        logger.error(f"Error getting workers: {e}")
+        conn.close()
+        return []
+
+def get_worker_by_id(worker_id):
+    """
+    Get worker information by ID.
+    
+    Args:
+        worker_id (int): Telegram user ID of the worker
+        
+    Returns:
+        dict: Worker information or None if not found
+    """
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    
+    try:
+        cursor.execute("SELECT id, username FROM workers WHERE id = ?", (worker_id,))
+        row = cursor.fetchone()
+        conn.close()
+        
+        if row:
+            return {"id": row[0], "username": row[1]}
+        return None
+    except Exception as e:
+        logger.error(f"Error getting worker: {e}")
+        conn.close()
+        return None
+
+def worker_exists(worker_id):
+    """
+    Check if a worker exists in the database.
+    
+    Args:
+        worker_id (int): Telegram user ID of the worker
+        
+    Returns:
+        bool: True if worker exists, False otherwise
+    """
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    
+    try:
+        cursor.execute("SELECT id FROM workers WHERE id = ?", (worker_id,))
+        result = cursor.fetchone() is not None
+        conn.close()
+        return result
+    except Exception as e:
+        logger.error(f"Error checking worker existence: {e}")
+        conn.close()
+        return False
+
+def create_task(address, date, time, description):
+    """
+    Create a new task.
+    
+    Args:
+        address (str): Location of the task
+        date (str): Date of the task (YYYY-MM-DD)
+        time (str): Time of the task (HH:MM)
+        description (str): Description of the task
+        
+    Returns:
+        int: ID of the created task, or None if creation failed
+    """
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    
     try:
         cursor.execute(
-            "INSERT INTO worker_task_responses (worker_id, task_id, response) VALUES (?, ?, ?)",
-            (worker_id, task_id, 'accepted')
+            "INSERT INTO tasks (address, date, time, description) VALUES (?, ?, ?, ?)",
+            (address, date, time, description)
         )
-    except sqlite3.IntegrityError:
-        # Update existing response
+        task_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+        logger.info(f"Created task with ID: {task_id}")
+        return task_id
+    except Exception as e:
+        logger.error(f"Error creating task: {e}")
+        conn.close()
+        return None
+
+def get_task_by_id(task_id):
+    """
+    Get task information by ID.
+    
+    Args:
+        task_id (int): ID of the task
+        
+    Returns:
+        dict: Task information or None if not found
+    """
+    conn = sqlite3.connect(DB_FILE)
+    conn.row_factory = sqlite3.Row  # Enable row factory for dictionary access
+    cursor = conn.cursor()
+    
+    try:
         cursor.execute(
-            "UPDATE worker_task_responses SET response = ? WHERE worker_id = ? AND task_id = ?",
-            ('accepted', worker_id, task_id)
+            "SELECT id, address, date, time, description, assigned_to FROM tasks WHERE id = ?", 
+            (task_id,)
         )
-    
-    conn.commit()
-    conn.close()
-    
-    return True
+        row = cursor.fetchone()
+        conn.close()
+        
+        if row:
+            return dict(row)
+        return None
+    except Exception as e:
+        logger.error(f"Error getting task: {e}")
+        conn.close()
+        return None
 
 def update_task_status(task_id, worker_id, response):
-    """Update a worker's response to a task."""
-    conn = get_connection()
+    """
+    Update task status when a worker accepts or declines.
+    
+    Args:
+        task_id (int): ID of the task
+        worker_id (int): Telegram user ID of the worker
+        response (str): 'accepted' or 'declined'
+        
+    Returns:
+        bool: True if update was successful, False otherwise
+    """
+    conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     
-    # Record the worker's response
+    try:
+        # Check if task exists
+        cursor.execute("SELECT id, assigned_to FROM tasks WHERE id = ?", (task_id,))
+        task = cursor.fetchone()
+        
+        if not task:
+            conn.close()
+            return False
+        
+        # Check if task is already assigned
+        if task[1] is not None and response == "accepted":
+            conn.close()
+            return False
+        
+        # Record the worker's response
+        try:
+            cursor.execute(
+                "INSERT INTO worker_responses (worker_id, task_id, response) VALUES (?, ?, ?)",
+                (worker_id, task_id, response)
+            )
+        except sqlite3.IntegrityError:
+            # Worker already responded to this task, update their response
+            cursor.execute(
+                "UPDATE worker_responses SET response = ?, response_time = CURRENT_TIMESTAMP WHERE worker_id = ? AND task_id = ?",
+                (response, worker_id, task_id)
+            )
+        
+        # If the response is 'accepted', assign the task to the worker
+        if response == "accepted":
+            cursor.execute(
+                "UPDATE tasks SET assigned_to = ? WHERE id = ?",
+                (worker_id, task_id)
+            )
+        
+        conn.commit()
+        conn.close()
+        logger.info(f"Worker {worker_id} {response} task {task_id}")
+        return True
+    except Exception as e:
+        logger.error(f"Error updating task status: {e}")
+        conn.rollback()
+        conn.close()
+        return False
+
+def get_all_tasks():
+    """
+    Get all tasks.
+    
+    Returns:
+        list: List of dictionaries containing task information
+    """
+    conn = sqlite3.connect(DB_FILE)
+    conn.row_factory = sqlite3.Row  # Enable row factory for dictionary access
+    cursor = conn.cursor()
+    
     try:
         cursor.execute(
-            "INSERT INTO worker_task_responses (worker_id, task_id, response) VALUES (?, ?, ?)",
-            (worker_id, task_id, response)
+            "SELECT t.id, t.address, t.date, t.time, t.description, t.assigned_to, w.username as worker_name "
+            "FROM tasks t LEFT JOIN workers w ON t.assigned_to = w.id "
+            "ORDER BY t.created_at DESC"
         )
-    except sqlite3.IntegrityError:
-        # Update existing response
-        cursor.execute(
-            "UPDATE worker_task_responses SET response = ? WHERE worker_id = ? AND task_id = ?",
-            (response, worker_id, task_id)
-        )
+        tasks = []
+        for row in cursor.fetchall():
+            task = dict(row)
+            if task["worker_name"]:
+                task["assigned_to_name"] = task["worker_name"]
+            tasks.append(task)
+        conn.close()
+        return tasks
+    except Exception as e:
+        logger.error(f"Error getting tasks: {e}")
+        conn.close()
+        return []
+
+def get_worker_stats(worker_id):
+    """
+    Get performance statistics for a worker.
     
-    conn.commit()
-    conn.close()
+    Args:
+        worker_id (int): Telegram user ID of the worker
+        
+    Returns:
+        dict: Dictionary containing performance statistics
+    """
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    
+    try:
+        # Get accepted tasks count
+        cursor.execute(
+            "SELECT COUNT(*) FROM worker_responses WHERE worker_id = ? AND response = 'accepted'",
+            (worker_id,)
+        )
+        accepted = cursor.fetchone()[0]
+        
+        # Get declined tasks count
+        cursor.execute(
+            "SELECT COUNT(*) FROM worker_responses WHERE worker_id = ? AND response = 'declined'",
+            (worker_id,)
+        )
+        declined = cursor.fetchone()[0]
+        
+        # Calculate acceptance rate
+        total = accepted + declined
+        acceptance_rate = 0
+        if total > 0:
+            acceptance_rate = round((accepted / total) * 100)
+        
+        conn.close()
+        return {
+            "accepted": accepted,
+            "declined": declined,
+            "total": total,
+            "acceptance_rate": acceptance_rate
+        }
+    except Exception as e:
+        logger.error(f"Error getting worker stats: {e}")
+        conn.close()
+        return {
+            "accepted": 0,
+            "declined": 0,
+            "total": 0,
+            "acceptance_rate": 0
+        }

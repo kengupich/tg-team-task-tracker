@@ -1,56 +1,92 @@
 # Team Task Management Telegram Bot
 
-A Python-based Telegram bot for team task management with admin controls, worker assignment, and performance tracking.
+A Telegram bot for team task management with admin controls, worker assignment, and performance tracking. The system includes a web dashboard for monitoring tasks and worker performance.
 
 ## Features
 
-- Admin can create tasks with details (address, date, time)
-- Task broadcasting to all registered workers
-- Workers can accept/decline tasks
-- First worker to accept gets assigned the task
-- Performance tracking system
-- Admin panel with worker management and statistics
-- Task listing and filtering
+- **Admin Controls**:
+  - Create tasks with detailed information (address, date, time, description)
+  - View all registered workers
+  - Add or remove workers
+  - View worker performance statistics
 
-## Requirements
+- **Worker Features**:
+  - Receive notifications about new tasks
+  - Accept or decline tasks (using inline buttons or commands)
+  - View assigned tasks
+  - View personal performance stats
 
-- Python 3.7+
-- python-telegram-bot library
-- python-dotenv
-- SQLite3 (included in Python)
+- **Task Management**:
+  - First worker to accept a task gets assigned
+  - Tasks are stored in a SQLite database
+  - Worker performance tracking
+  - Web dashboard to visualize tasks and statistics
 
-## Installation
+## Setup Instructions
 
-1. Clone this repository:
-   ```
-   git clone https://github.com/yourusername/team-task-bot.git
-   cd team-task-bot
-   ```
+### Prerequisites
 
-2. Install the required dependencies:
-   ```
-   pip install python-telegram-bot python-dotenv
-   ```
+- Python 3.6+
+- pip (Python package manager)
 
-3. Create a `.env` file based on the provided `.env.example`:
-   ```
-   cp .env.example .env
-   ```
+### Installation
 
-4. Edit the `.env` file and add your Telegram Bot Token:
+1. Clone this repository or download the files
+
+2. Install required dependencies:
    ```
-   TELEGRAM_BOT_TOKEN=your_telegram_bot_token_here
+   pip install python-telegram-bot python-dotenv flask gunicorn
    ```
 
-## Getting a Telegram Bot Token
+3. Configure your environment:
+   - Create a `.env` file in the project root (use `.env.example` as a template)
+   - Add your Telegram Bot Token (get from @BotFather on Telegram)
+   - Add your Telegram user ID to the ADMIN_IDS list to gain admin privileges
 
-1. Open Telegram and search for [@BotFather](https://t.me/BotFather)
-2. Start a chat with BotFather and send the command `/newbot`
-3. Follow the instructions to create a new bot
-4. Once created, BotFather will provide you with a token
-5. Copy this token to your `.env` file
+4. Run the bot:
+   ```
+   python bot.py
+   ```
 
-## Running the Bot
+5. Run the web dashboard (optional):
+   ```
+   python main.py
+   ```
 
-Start the bot with:
+## Bot Commands
 
+### Admin Commands
+- `/start` - Get started with the bot
+- `/help` - Show available commands
+- `/create_task` - Create a new task
+- `/add_worker` - Register a new worker
+- `/remove_worker` - Unregister a worker
+- `/list_workers` - View all registered workers
+- `/list_tasks` - View all tasks
+- `/view_stats` - View worker performance stats
+
+### Worker Commands
+- `/start` - Get started with the bot
+- `/help` - Show available commands
+- `/accept` - Accept a task (followed by task ID)
+- `/decline` - Decline a task (followed by task ID)
+- `/my_tasks` - View your assigned tasks
+- `/my_stats` - View your performance stats
+
+## Project Structure
+
+- `bot.py` - Main Telegram bot implementation
+- `database.py` - Database operations and task management
+- `utils.py` - Helper functions
+- `main.py` - Web dashboard for the bot
+- `templates/` - HTML templates for the web dashboard
+- `.env.example` - Template for the environment variables
+- `task_management.db` - SQLite database (created automatically)
+
+## Customization
+
+You can customize the bot by modifying the following:
+1. Edit `database.py` to change the database structure or add more fields
+2. Modify `templates/index.html` to enhance the web dashboard
+3. Add additional commands in `bot.py`
+   

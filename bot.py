@@ -1,615 +1,773 @@
-import logging
+#!/usr/bin/env python3
+"""
+Team Task Management Telegram Bot
+This bot allows admins to create tasks, workers to accept/decline them,
+and tracks worker performance in a SQLite database.
+"""
 import os
+import logging
 from datetime import datetime
-from telegram._update import Update
-from telegram.ext._application import Application
-from telegram.ext._commandhandler import CommandHandler
-from telegram.ext._conversationhandler import ConversationHandler
-from telegram.ext._contexttypes import ContextTypes
-from telegram.ext._messagehandler import MessageHandler
-from telegram.ext._filters_base import filters
 from dotenv import load_dotenv
-from database import (
-    get_connection,
-    init_database,
-    register_worker,
-    list_all_workers,
-    get_worker_stats,
-    create_task_record,
-    list_tasks,
-    get_pending_tasks,
-    assign_task,
-    update_task_status,
-    is_worker_registered,
-    is_admin,
-    register_admin,
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    ContextTypes,
+    CallbackQueryHandler,
+    ConversationHandler,
+    MessageHandler,
+    filters,
 )
+from database import (
+    init_db,
+    add_worker,
+    remove_worker,
+    get_all_workers,
+    create_task,
+    get_task_by_id,
+    update_task_status,
+    get_all_tasks,
+    get_worker_stats,
+    get_worker_by_id,
+    worker_exists,
+)
+from utils import is_admin
 
-# Load environment variables from .env file
-load_dotenv()
-
-# Configure logging
+# Enable logging
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
-# States for the conversation handler
+# Load environment variables
+load_dotenv()
+TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+ADMIN_IDS = [int(id) for id in os.getenv("ADMIN_IDS", "").split(",") if id]
+
+# States for conversation handlers
 TASK_ADDRESS, TASK_DATE, TASK_TIME, TASK_DESCRIPTION = range(4)
-WORKER_NAME, WORKER_PHONE = range(2)
+WORKER_USERNAME = range(1)
 
-# Dictionary to store task creation data
-task_data = {}
+# Initialize database
+init_db()
 
-def start_bot():
-    """Initialize and start the Telegram bot."""
-    # Get token from environment variable
-    token = os.getenv("TELEGRAM_BOT_TOKEN")
-    if not token:
-        logger.error("TELEGRAM_BOT_TOKEN not found in .env file")
-        return
-
-    # Initialize database
-    init_database()
-
-    # Create application
-    application = Application.builder().token(token).build()
-
-    # Add command handlers
-    application.add_handler(CommandHandler("start", start_command))
-    application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CommandHandler("register_admin", register_admin_command))
-    application.add_handler(CommandHandler("add_worker", add_worker_command))
-    application.add_handler(CommandHandler("view_stats", view_stats_command))
-    application.add_handler(CommandHandler("list_tasks", list_tasks_command))
-    application.add_handler(CommandHandler("accept", accept_task_command))
-    application.add_handler(CommandHandler("decline", decline_task_command))
-
-    # Add conversation handler for task creation
-    task_creation_handler = ConversationHandler(
-        entry_points=[CommandHandler("create_task", create_task_command)],
-        states={
-            TASK_ADDRESS: [MessageHandler(filters.TEXT & ~filters.COMMAND, task_address_callback)],
-            TASK_DATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, task_date_callback)],
-            TASK_TIME: [MessageHandler(filters.TEXT & ~filters.COMMAND, task_time_callback)],
-            TASK_DESCRIPTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, task_description_callback)],
-        },
-        fallbacks=[CommandHandler("cancel", cancel_task_creation)],
-    )
-    application.add_handler(task_creation_handler)
-
-    # Add conversation handler for worker registration
-    worker_registration_handler = ConversationHandler(
-        entry_points=[CommandHandler("register", register_worker_command)],
-        states={
-            WORKER_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, worker_name_callback)],
-            WORKER_PHONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, worker_phone_callback)],
-        },
-        fallbacks=[CommandHandler("cancel", cancel_worker_registration)],
-    )
-    application.add_handler(worker_registration_handler)
-
-    # Start the bot
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
-
-async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle the /start command."""
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Send a message when the command /start is issued."""
     user_id = update.effective_user.id
-    username = update.effective_user.username
+    user_name = update.effective_user.first_name
     
-    # Register admin if this is the first user (only for setup purposes)
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT COUNT(*) FROM admins")
-    admin_count = cursor.fetchone()[0]
-    
-    if admin_count == 0:
-        register_admin(user_id, username)
-        await update.message.reply_text(
-            f"Welcome {username}! You have been registered as the first admin.\n\n"
-            "Use /help to see available commands."
+    if is_admin(user_id, ADMIN_IDS):
+        message = (
+            f"👋 Welcome, Admin {user_name}!\n\n"
+            "🔹 Use /create_task to add a new task\n"
+            "🔹 Use /add_worker to register a new worker\n"
+            "🔹 Use /remove_worker to unregister a worker\n"
+            "🔹 Use /list_workers to see all registered workers\n"
+            "🔹 Use /list_tasks to see all tasks\n"
+            "🔹 Use /view_stats to check worker performance\n"
+            "🔹 Use /help for more information"
         )
     else:
-        if is_admin(user_id):
-            await update.message.reply_text(
-                f"Welcome back, Admin {username}!\n\n"
-                "Use /help to see available commands."
-            )
-        elif is_worker_registered(user_id):
-            await update.message.reply_text(
-                f"Welcome back, Worker {username}!\n\n"
-                "Use /help to see available commands."
-            )
-        else:
-            await update.message.reply_text(
-                f"Welcome {username}! You are not registered yet.\n\n"
-                "Workers use /register to register yourself.\n"
-                "Admins need to be added by an existing admin."
-            )
+        # Add worker to database if they don't exist yet
+        if not worker_exists(user_id):
+            username = update.effective_user.username or user_name
+            add_worker(user_id, username)
+            
+        message = (
+            f"👋 Welcome, {user_name}!\n\n"
+            "You'll receive task notifications when they're available.\n"
+            "🔹 Use /accept to accept a task\n"
+            "🔹 Use /decline to decline a task\n"
+            "🔹 Use /my_tasks to see your assigned tasks\n"
+            "🔹 Use /my_stats to see your performance\n"
+            "🔹 Use /help for more information"
+        )
+    
+    await update.message.reply_text(message)
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle the /help command."""
+    """Send a message when the command /help is issued."""
     user_id = update.effective_user.id
     
-    if is_admin(user_id):
-        # Admin help message
-        help_text = (
-            "Available admin commands:\n"
-            "/create_task - Create a new task for workers\n"
-            "/add_worker - Register a new worker (must provide Telegram user ID)\n"
-            "/view_stats - View worker performance statistics\n"
-            "/list_tasks - List all tasks\n"
-            "/register_admin - Register another admin\n"
-            "/help - Show this help message"
-        )
-    elif is_worker_registered(user_id):
-        # Worker help message
-        help_text = (
-            "Available worker commands:\n"
-            "/accept - Accept a task that was sent to you\n"
-            "/decline - Decline a task that was sent to you\n"
-            "/help - Show this help message"
+    if is_admin(user_id, ADMIN_IDS):
+        message = (
+            "📋 *Admin Commands:*\n"
+            "/create_task - Create a new task\n"
+            "/add_worker - Register a new worker\n"
+            "/remove_worker - Unregister a worker\n"
+            "/list_workers - View all registered workers\n"
+            "/list_tasks - View all tasks\n"
+            "/view_stats - View worker performance stats\n"
+            "/help - Show this help message\n"
         )
     else:
-        # Unregistered user help message
-        help_text = (
-            "Welcome to the Team Task Management Bot!\n\n"
-            "Workers use /register to register yourself.\n"
-            "Admins need to be added by an existing admin."
+        message = (
+            "📋 *Worker Commands:*\n"
+            "/accept - Accept a task (with task ID)\n"
+            "/decline - Decline a task (with task ID)\n"
+            "/my_tasks - View your assigned tasks\n"
+            "/my_stats - View your performance stats\n"
+            "/help - Show this help message\n"
         )
     
-    await update.message.reply_text(help_text)
+    await update.message.reply_text(message, parse_mode="Markdown")
 
-async def register_admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle the /register_admin command to register another admin."""
+# Admin: Create task conversation handler
+async def create_task_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Start the task creation process."""
     user_id = update.effective_user.id
     
-    # Check if the user is already an admin
-    if not is_admin(user_id):
-        await update.message.reply_text("You must be an admin to register other admins.")
-        return
-    
-    # Check if the command has the right format
-    if not context.args or len(context.args) != 1:
-        await update.message.reply_text(
-            "Please provide the Telegram user ID of the new admin.\n"
-            "Usage: /register_admin <user_id>"
-        )
-        return
-    
-    try:
-        new_admin_id = int(context.args[0])
-        register_admin(new_admin_id, f"Admin {new_admin_id}")
-        await update.message.reply_text(f"Successfully registered user {new_admin_id} as an admin.")
-    except ValueError:
-        await update.message.reply_text("Invalid user ID. Please provide a valid numeric ID.")
-
-async def create_task_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Start the task creation conversation."""
-    user_id = update.effective_user.id
-    
-    if not is_admin(user_id):
-        await update.message.reply_text("Only admins can create tasks.")
+    if not is_admin(user_id, ADMIN_IDS):
+        await update.message.reply_text("⚠️ You don't have admin privileges.")
         return ConversationHandler.END
     
-    # Start new task creation
-    task_data[user_id] = {}
-    
-    await update.message.reply_text(
-        "Let's create a new task. First, send me the address where the task will take place."
-    )
+    await update.message.reply_text("📍 Please enter the task address:")
     return TASK_ADDRESS
 
-async def task_address_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle the task address step."""
-    user_id = update.effective_user.id
-    task_data[user_id]['address'] = update.message.text
-    
+async def task_address(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Store task address and ask for date."""
+    context.user_data["address"] = update.message.text
     await update.message.reply_text(
-        "Great! Now please send me the date for this task (format: YYYY-MM-DD)."
+        "📆 Please enter the task date (YYYY-MM-DD):"
     )
     return TASK_DATE
 
-async def task_date_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle the task date step."""
-    user_id = update.effective_user.id
+async def task_date(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Store task date and ask for time."""
     date_text = update.message.text
     
+    # Validate date format
     try:
-        # Validate date format
         datetime.strptime(date_text, "%Y-%m-%d")
-        task_data[user_id]['date'] = date_text
-        
+        context.user_data["date"] = date_text
         await update.message.reply_text(
-            "Now, please send me the time for this task (format: HH:MM)."
+            "🕒 Please enter the task time (HH:MM):"
         )
         return TASK_TIME
     except ValueError:
         await update.message.reply_text(
-            "Invalid date format. Please use YYYY-MM-DD (e.g., 2023-11-15)."
+            "⚠️ Invalid date format. Please use YYYY-MM-DD (e.g., 2023-12-31):"
         )
         return TASK_DATE
 
-async def task_time_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle the task time step."""
-    user_id = update.effective_user.id
+async def task_time(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Store task time and ask for description."""
     time_text = update.message.text
     
+    # Validate time format
     try:
-        # Validate time format
         datetime.strptime(time_text, "%H:%M")
-        task_data[user_id]['time'] = time_text
-        
+        context.user_data["time"] = time_text
         await update.message.reply_text(
-            "Finally, please provide a brief description of the task."
+            "📝 Please enter the task description:"
         )
         return TASK_DESCRIPTION
     except ValueError:
         await update.message.reply_text(
-            "Invalid time format. Please use HH:MM (e.g., 14:30)."
+            "⚠️ Invalid time format. Please use HH:MM (e.g., 14:30):"
         )
         return TASK_TIME
 
-async def task_description_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle the task description step and finalize task creation."""
-    user_id = update.effective_user.id
-    task_data[user_id]['description'] = update.message.text
+async def task_description(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Store task description and create task in database."""
+    context.user_data["description"] = update.message.text
     
-    # Create the task in the database
-    task = task_data[user_id]
-    task_id = create_task_record(
-        task['address'],
-        task['date'],
-        task['time'],
-        task['description'],
-        user_id  # Admin ID
+    # Create task in database
+    task_id = create_task(
+        context.user_data["address"],
+        context.user_data["date"],
+        context.user_data["time"],
+        context.user_data["description"]
     )
     
+    # Send confirmation message to admin
     await update.message.reply_text(
-        f"Task created successfully!\n\n"
-        f"Task ID: {task_id}\n"
-        f"Address: {task['address']}\n"
-        f"Date: {task['date']}\n"
-        f"Time: {task['time']}\n"
-        f"Description: {task['description']}"
+        f"✅ Task created successfully!\n\n"
+        f"📝 *Task ID:* {task_id}\n"
+        f"📍 *Address:* {context.user_data['address']}\n"
+        f"📆 *Date:* {context.user_data['date']}\n"
+        f"🕒 *Time:* {context.user_data['time']}\n"
+        f"📄 *Description:* {context.user_data['description']}",
+        parse_mode="Markdown"
     )
     
     # Broadcast task to all workers
-    await broadcast_task_to_workers(context, task_id, task)
-    
-    # Clean up the task_data
-    del task_data[user_id]
-    
-    return ConversationHandler.END
-
-async def broadcast_task_to_workers(context, task_id, task):
-    """Broadcast a new task to all registered workers."""
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT user_id FROM workers")
-    workers = cursor.fetchall()
-    conn.close()
-    
-    # Generate task message
-    task_message = (
-        f"🔔 *NEW TASK AVAILABLE* 🔔\n\n"
-        f"*Task ID:* {task_id}\n"
-        f"*Address:* {task['address']}\n"
-        f"*Date:* {task['date']}\n"
-        f"*Time:* {task['time']}\n"
-        f"*Description:* {task['description']}\n\n"
-        f"Reply with /accept to take this task or /decline to pass."
+    workers = get_all_workers()
+    task_details = (
+        f"🆕 *New Task Available*\n\n"
+        f"📝 *Task ID:* {task_id}\n"
+        f"📍 *Address:* {context.user_data['address']}\n"
+        f"📆 *Date:* {context.user_data['date']}\n"
+        f"🕒 *Time:* {context.user_data['time']}\n"
+        f"📄 *Description:* {context.user_data['description']}\n\n"
+        f"Use /accept {task_id} to accept this task or /decline {task_id} to decline."
     )
     
-    # Send message to all workers
-    sent_count = 0
+    keyboard = [
+        [
+            InlineKeyboardButton("Accept ✅", callback_data=f"accept_{task_id}"),
+            InlineKeyboardButton("Decline ❌", callback_data=f"decline_{task_id}")
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    broadcast_count = 0
     for worker in workers:
-        worker_id = worker[0]
         try:
             await context.bot.send_message(
-                chat_id=worker_id,
-                text=task_message,
-                parse_mode="Markdown"
+                chat_id=worker["id"],
+                text=task_details,
+                parse_mode="Markdown",
+                reply_markup=reply_markup
             )
-            sent_count += 1
+            broadcast_count += 1
         except Exception as e:
-            logger.error(f"Failed to send message to worker {worker_id}: {e}")
+            logger.error(f"Failed to send task to worker {worker['id']}: {e}")
     
-    logger.info(f"Task broadcast to {sent_count} workers")
+    await update.message.reply_text(
+        f"📢 Task broadcast to {broadcast_count} workers."
+    )
+    
+    # Clear user data
+    context.user_data.clear()
+    return ConversationHandler.END
 
 async def cancel_task_creation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Cancel the task creation process."""
-    user_id = update.effective_user.id
-    
-    if user_id in task_data:
-        del task_data[user_id]
-    
-    await update.message.reply_text("Task creation canceled.")
+    await update.message.reply_text("❌ Task creation cancelled.")
+    context.user_data.clear()
     return ConversationHandler.END
 
-async def add_worker_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle the /add_worker command to add a new worker."""
+# Admin: Add worker conversation handler
+async def add_worker_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Start the process to add a worker."""
     user_id = update.effective_user.id
     
-    if not is_admin(user_id):
-        await update.message.reply_text("Only admins can add workers.")
+    if not is_admin(user_id, ADMIN_IDS):
+        await update.message.reply_text("⚠️ You don't have admin privileges.")
+        return ConversationHandler.END
+    
+    await update.message.reply_text(
+        "Please enter the Telegram ID of the worker to add.\n"
+        "(Note: The worker needs to start the bot first)"
+    )
+    return WORKER_USERNAME
+
+async def add_worker_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Process worker ID and add to database."""
+    try:
+        worker_id = int(update.message.text.strip())
+        worker_name = f"Worker-{worker_id}"
+        
+        # Add worker to database
+        success = add_worker(worker_id, worker_name)
+        
+        if success:
+            await update.message.reply_text(f"✅ Worker with ID {worker_id} added successfully!")
+            
+            # Notify the worker
+            try:
+                await context.bot.send_message(
+                    chat_id=worker_id,
+                    text="✅ You have been added as a worker by an admin. You'll now receive task notifications."
+                )
+            except Exception as e:
+                await update.message.reply_text(
+                    f"⚠️ Worker added, but notification failed: {str(e)}\n"
+                    "Make sure the worker has started a conversation with the bot."
+                )
+        else:
+            await update.message.reply_text(f"ℹ️ Worker with ID {worker_id} already exists.")
+        
+        return ConversationHandler.END
+    except ValueError:
+        await update.message.reply_text("⚠️ Invalid worker ID. Please enter a valid numerical Telegram ID:")
+        return WORKER_USERNAME
+
+async def cancel_add_worker(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Cancel the worker addition process."""
+    await update.message.reply_text("❌ Worker addition cancelled.")
+    return ConversationHandler.END
+
+# Admin: Remove worker command
+async def remove_worker_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Remove a worker from the system."""
+    user_id = update.effective_user.id
+    
+    if not is_admin(user_id, ADMIN_IDS):
+        await update.message.reply_text("⚠️ You don't have admin privileges.")
         return
     
-    # Check if the command has the right format
-    if not context.args or len(context.args) < 2:
-        await update.message.reply_text(
-            "Please provide the Telegram user ID, name, and phone (optional).\n"
-            "Usage: /add_worker <user_id> <name> [phone]"
-        )
+    if not context.args:
+        await update.message.reply_text("⚠️ Please provide a worker ID: /remove_worker [worker_id]")
         return
     
     try:
         worker_id = int(context.args[0])
-        name = context.args[1]
-        phone = context.args[2] if len(context.args) > 2 else None
+        success = remove_worker(worker_id)
         
-        if is_worker_registered(worker_id):
-            await update.message.reply_text(f"Worker with ID {worker_id} is already registered.")
-            return
-        
-        register_worker(worker_id, name, phone)
-        await update.message.reply_text(f"Successfully registered worker: {name} (ID: {worker_id})")
-        
-        # Inform the worker they've been added
-        try:
-            await context.bot.send_message(
-                chat_id=worker_id,
-                text=f"You have been registered as a worker by an admin. Use /help to see available commands."
-            )
-        except Exception as e:
-            await update.message.reply_text(
-                f"Worker registered, but couldn't notify them: {e}\n"
-                "Make sure the worker has started a conversation with the bot."
-            )
-    
+        if success:
+            await update.message.reply_text(f"✅ Worker with ID {worker_id} removed successfully!")
+            
+            # Notify the worker
+            try:
+                await context.bot.send_message(
+                    chat_id=worker_id,
+                    text="ℹ️ You have been removed as a worker by an admin. You'll no longer receive task notifications."
+                )
+            except Exception:
+                pass  # Ignore if notification fails
+        else:
+            await update.message.reply_text(f"⚠️ Worker with ID {worker_id} not found.")
     except ValueError:
-        await update.message.reply_text("Invalid user ID. Please provide a valid numeric ID.")
+        await update.message.reply_text("⚠️ Invalid worker ID. Please provide a valid numerical ID.")
 
-async def register_worker_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Start the worker self-registration conversation."""
+# Admin: List workers command
+async def list_workers_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """List all registered workers."""
     user_id = update.effective_user.id
     
-    if is_worker_registered(user_id):
-        await update.message.reply_text("You are already registered as a worker.")
-        return ConversationHandler.END
-    
-    await update.message.reply_text("Let's register you as a worker. What is your full name?")
-    return WORKER_NAME
-
-async def worker_name_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle the worker name step."""
-    user_id = update.effective_user.id
-    name = update.message.text
-    
-    # Store the name in context
-    context.user_data['worker_name'] = name
-    
-    await update.message.reply_text("Please provide your phone number.")
-    return WORKER_PHONE
-
-async def worker_phone_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle the worker phone step and complete registration."""
-    user_id = update.effective_user.id
-    phone = update.message.text
-    name = context.user_data.get('worker_name', 'Unknown')
-    
-    register_worker(user_id, name, phone)
-    
-    await update.message.reply_text(
-        f"Thank you, {name}! You have been registered as a worker.\n"
-        "You will receive tasks from admins. Use /help to see available commands."
-    )
-    
-    return ConversationHandler.END
-
-async def cancel_worker_registration(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Cancel the worker registration process."""
-    await update.message.reply_text("Worker registration canceled.")
-    return ConversationHandler.END
-
-async def view_stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle the /view_stats command to display worker statistics."""
-    user_id = update.effective_user.id
-    
-    if not is_admin(user_id):
-        await update.message.reply_text("Only admins can view worker statistics.")
+    if not is_admin(user_id, ADMIN_IDS):
+        await update.message.reply_text("⚠️ You don't have admin privileges.")
         return
     
-    # Get worker statistics from database
-    workers_stats = get_worker_stats()
+    workers = get_all_workers()
     
-    if not workers_stats:
-        await update.message.reply_text("No worker statistics available.")
+    if not workers:
+        await update.message.reply_text("ℹ️ No workers registered yet.")
         return
     
-    # Format the statistics message
-    stats_message = "*Worker Performance Statistics*\n\n"
-    for worker in workers_stats:
-        stats_message += (
-            f"*Worker:* {worker['name']}\n"
-            f"*Tasks Accepted:* {worker['tasks_accepted']}\n"
-            f"*Tasks Completed:* {worker['tasks_completed']}\n"
-            f"*Tasks Declined:* {worker['tasks_declined']}\n"
-            f"*Completion Rate:* {worker['completion_rate']}%\n\n"
-        )
+    workers_text = "👥 *Registered Workers:*\n\n"
+    for i, worker in enumerate(workers, 1):
+        workers_text += f"{i}. ID: {worker['id']} - {worker['username']}\n"
     
-    await update.message.reply_text(stats_message, parse_mode="Markdown")
+    await update.message.reply_text(workers_text, parse_mode="Markdown")
 
+# Admin: List tasks command
 async def list_tasks_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle the /list_tasks command to list all tasks."""
+    """List all tasks."""
     user_id = update.effective_user.id
     
-    if not is_admin(user_id):
-        await update.message.reply_text("Only admins can list all tasks.")
+    if not is_admin(user_id, ADMIN_IDS):
+        await update.message.reply_text("⚠️ You don't have admin privileges.")
         return
     
-    # Determine if any filters were provided
-    status_filter = None
-    if context.args and len(context.args) > 0:
-        status_arg = context.args[0].lower()
-        if status_arg in ["pending", "assigned", "completed", "declined"]:
-            status_filter = status_arg
-    
-    # Get tasks from database
-    tasks = list_tasks(status_filter)
+    tasks = get_all_tasks()
     
     if not tasks:
-        filter_text = f" with status '{status_filter}'" if status_filter else ""
-        await update.message.reply_text(f"No tasks{filter_text} found.")
+        await update.message.reply_text("ℹ️ No tasks created yet.")
         return
     
-    # Format the tasks list
-    filter_text = f"({status_filter.upper()})" if status_filter else ""
-    message = f"*Task List {filter_text}*\n\n"
-    
+    tasks_text = "📋 *All Tasks:*\n\n"
     for task in tasks:
-        status_text = task['status'].upper()
-        worker_text = f"Assigned to: {task['worker_name']}" if task['worker_name'] else "Unassigned"
+        status = "✅ Assigned" if task["assigned_to"] else "⏳ Pending"
+        assigned_to = f"👤 Assigned to: {task['assigned_to']}" if task["assigned_to"] else ""
         
-        message += (
+        tasks_text += (
             f"*Task ID:* {task['id']}\n"
-            f"*Date & Time:* {task['date']} at {task['time']}\n"
-            f"*Address:* {task['address']}\n"
-            f"*Description:* {task['description']}\n"
-            f"*Status:* {status_text}\n"
-            f"*{worker_text}*\n\n"
+            f"📍 *Address:* {task['address']}\n"
+            f"📆 *Date:* {task['date']}\n"
+            f"🕒 *Time:* {task['time']}\n"
+            f"📄 *Description:* {task['description']}\n"
+            f"🔄 *Status:* {status}\n"
+            f"{assigned_to}\n\n"
         )
     
-    # If message is too long, split it into chunks (Telegram has a 4096 character limit)
-    if len(message) > 4000:
-        chunks = [message[i:i+4000] for i in range(0, len(message), 4000)]
-        for chunk in chunks:
+    # Split message if it's too long
+    if len(tasks_text) > 4000:
+        task_chunks = []
+        current_chunk = "📋 *All Tasks:*\n\n"
+        
+        for task in tasks:
+            status = "✅ Assigned" if task["assigned_to"] else "⏳ Pending"
+            assigned_to = f"👤 Assigned to: {task['assigned_to']}" if task["assigned_to"] else ""
+            
+            task_text = (
+                f"*Task ID:* {task['id']}\n"
+                f"📍 *Address:* {task['address']}\n"
+                f"📆 *Date:* {task['date']}\n"
+                f"🕒 *Time:* {task['time']}\n"
+                f"📄 *Description:* {task['description']}\n"
+                f"🔄 *Status:* {status}\n"
+                f"{assigned_to}\n\n"
+            )
+            
+            if len(current_chunk) + len(task_text) > 4000:
+                task_chunks.append(current_chunk)
+                current_chunk = "📋 *All Tasks (continued):*\n\n" + task_text
+            else:
+                current_chunk += task_text
+        
+        task_chunks.append(current_chunk)
+        
+        for chunk in task_chunks:
             await update.message.reply_text(chunk, parse_mode="Markdown")
     else:
-        await update.message.reply_text(message, parse_mode="Markdown")
+        await update.message.reply_text(tasks_text, parse_mode="Markdown")
 
-async def accept_task_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle the /accept command for workers to accept tasks."""
+# Admin: View worker stats command
+async def view_stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """View performance stats for all workers."""
     user_id = update.effective_user.id
     
-    if not is_worker_registered(user_id):
-        await update.message.reply_text("You must be a registered worker to accept tasks.")
+    if not is_admin(user_id, ADMIN_IDS):
+        await update.message.reply_text("⚠️ You don't have admin privileges.")
         return
     
-    # Get pending tasks
-    pending_tasks = get_pending_tasks()
+    workers = get_all_workers()
     
-    if not pending_tasks:
-        await update.message.reply_text("There are no pending tasks available.")
+    if not workers:
+        await update.message.reply_text("ℹ️ No workers registered yet.")
         return
     
-    # If there's a pending task, assign it to this worker
-    latest_task = pending_tasks[0]  # Get the most recent pending task
-    task_id = latest_task['id']
+    stats_text = "📊 *Worker Performance Stats:*\n\n"
+    for worker in workers:
+        stats = get_worker_stats(worker["id"])
+        stats_text += (
+            f"👤 *{worker['username']}* (ID: {worker['id']})\n"
+            f"✅ Tasks accepted: {stats['accepted']}\n"
+            f"❌ Tasks declined: {stats['declined']}\n"
+            f"📊 Acceptance rate: {stats['acceptance_rate']}%\n\n"
+        )
     
-    # Try to assign the task to this worker
-    if assign_task(task_id, user_id):
-        # Success - notify the worker
-        await update.message.reply_text(
-            f"✅ You have been assigned task #{task_id}!\n\n"
-            f"*Address:* {latest_task['address']}\n"
-            f"*Date:* {latest_task['date']}\n"
-            f"*Time:* {latest_task['time']}\n"
-            f"*Description:* {latest_task['description']}\n",
-            parse_mode="Markdown"
-        )
-        
-        # Notify all admins
-        await notify_admins_task_assignment(context, task_id, user_id, latest_task)
-        
-        # Notify other workers that the task is no longer available
-        await notify_other_workers_task_taken(context, task_id, user_id)
-    else:
-        await update.message.reply_text(
-            "This task has already been assigned to another worker. "
-            "You'll be notified when new tasks are available."
-        )
+    await update.message.reply_text(stats_text, parse_mode="Markdown")
 
-async def notify_admins_task_assignment(context, task_id, worker_id, task):
-    """Notify all admins about task assignment."""
-    conn = get_connection()
-    cursor = conn.cursor()
+# Worker: Handle task acceptance
+async def accept_task(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle worker accepting a task."""
+    user_id = update.effective_user.id
     
-    # Get worker name
-    cursor.execute("SELECT name FROM workers WHERE user_id = ?", (worker_id,))
-    worker_result = cursor.fetchone()
-    worker_name = worker_result[0] if worker_result else "Unknown worker"
+    # Check if command has task_id argument
+    if not context.args:
+        await update.message.reply_text("⚠️ Please specify a task ID: /accept [task_id]")
+        return
     
-    # Get all admins
-    cursor.execute("SELECT user_id FROM admins")
-    admins = cursor.fetchall()
-    conn.close()
-    
-    notification = (
-        f"🔵 *TASK ASSIGNMENT NOTIFICATION* 🔵\n\n"
-        f"*Task #{task_id}* has been accepted by {worker_name}\n\n"
-        f"*Task Details:*\n"
-        f"Address: {task['address']}\n"
-        f"Date: {task['date']} at {task['time']}\n"
-        f"Description: {task['description']}"
-    )
-    
-    for admin in admins:
-        admin_id = admin[0]
-        try:
-            await context.bot.send_message(
-                chat_id=admin_id,
-                text=notification,
+    try:
+        task_id = int(context.args[0])
+        task = get_task_by_id(task_id)
+        
+        if not task:
+            await update.message.reply_text(f"⚠️ Task with ID {task_id} not found.")
+            return
+        
+        if task["assigned_to"]:
+            await update.message.reply_text("⚠️ This task has already been assigned to another worker.")
+            return
+        
+        # Update task as accepted
+        worker = get_worker_by_id(user_id)
+        if not worker:
+            await update.message.reply_text("⚠️ You're not registered as a worker.")
+            return
+        
+        success = update_task_status(task_id, user_id, "accepted")
+        
+        if success:
+            # Notify the worker
+            await update.message.reply_text(
+                f"✅ You've successfully accepted task #{task_id}!\n\n"
+                f"📍 *Address:* {task['address']}\n"
+                f"📆 *Date:* {task['date']}\n"
+                f"🕒 *Time:* {task['time']}\n"
+                f"📄 *Description:* {task['description']}",
                 parse_mode="Markdown"
             )
-        except Exception as e:
-            logger.error(f"Failed to notify admin {admin_id}: {e}")
+            
+            # Notify the admin
+            for admin_id in ADMIN_IDS:
+                try:
+                    await context.bot.send_message(
+                        chat_id=admin_id,
+                        text=(
+                            f"✅ Task #{task_id} has been accepted by {worker['username']} (ID: {user_id})!\n\n"
+                            f"📍 *Address:* {task['address']}\n"
+                            f"📆 *Date:* {task['date']}\n"
+                            f"🕒 *Time:* {task['time']}",
+                        ),
+                        parse_mode="Markdown"
+                    )
+                except Exception:
+                    pass  # Ignore if notification fails
+            
+            # Notify other workers that the task is no longer available
+            workers = get_all_workers()
+            for w in workers:
+                if w["id"] != user_id:
+                    try:
+                        await context.bot.send_message(
+                            chat_id=w["id"],
+                            text=f"ℹ️ Task #{task_id} has been assigned to another worker."
+                        )
+                    except Exception:
+                        pass  # Ignore if notification fails
+        else:
+            await update.message.reply_text("⚠️ Failed to accept the task. It may have been assigned already.")
+    except ValueError:
+        await update.message.reply_text("⚠️ Invalid task ID. Please provide a valid numerical ID.")
 
-async def notify_other_workers_task_taken(context, task_id, accepted_worker_id):
-    """Notify other workers that a task has been taken."""
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT user_id FROM workers WHERE user_id != ?", (accepted_worker_id,))
-    workers = cursor.fetchall()
-    conn.close()
-    
-    notification = (
-        f"Task #{task_id} has been assigned to another worker. "
-        f"You'll be notified when new tasks are available."
-    )
-    
-    for worker in workers:
-        worker_id = worker[0]
-        try:
-            await context.bot.send_message(
-                chat_id=worker_id,
-                text=notification
-            )
-        except Exception as e:
-            logger.error(f"Failed to notify worker {worker_id}: {e}")
-
-async def decline_task_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle the /decline command for workers to decline tasks."""
+# Worker: Handle task decline
+async def decline_task(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle worker declining a task."""
     user_id = update.effective_user.id
     
-    if not is_worker_registered(user_id):
-        await update.message.reply_text("You must be a registered worker to decline tasks.")
+    # Check if command has task_id argument
+    if not context.args:
+        await update.message.reply_text("⚠️ Please specify a task ID: /decline [task_id]")
         return
     
-    # Get pending tasks
-    pending_tasks = get_pending_tasks()
+    try:
+        task_id = int(context.args[0])
+        task = get_task_by_id(task_id)
+        
+        if not task:
+            await update.message.reply_text(f"⚠️ Task with ID {task_id} not found.")
+            return
+        
+        if task["assigned_to"]:
+            await update.message.reply_text("⚠️ This task has already been assigned to another worker.")
+            return
+        
+        # Update task as declined for this worker
+        worker = get_worker_by_id(user_id)
+        if not worker:
+            await update.message.reply_text("⚠️ You're not registered as a worker.")
+            return
+        
+        success = update_task_status(task_id, user_id, "declined")
+        
+        if success:
+            await update.message.reply_text(f"✓ You've declined task #{task_id}.")
+            
+            # Notify the admin
+            for admin_id in ADMIN_IDS:
+                try:
+                    await context.bot.send_message(
+                        chat_id=admin_id,
+                        text=f"ℹ️ Task #{task_id} has been declined by {worker['username']} (ID: {user_id})."
+                    )
+                except Exception:
+                    pass  # Ignore if notification fails
+        else:
+            await update.message.reply_text("⚠️ Failed to decline the task.")
+    except ValueError:
+        await update.message.reply_text("⚠️ Invalid task ID. Please provide a valid numerical ID.")
+
+# Worker: View assigned tasks
+async def my_tasks_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """View tasks assigned to the worker."""
+    user_id = update.effective_user.id
     
-    if not pending_tasks:
-        await update.message.reply_text("There are no pending tasks to decline.")
+    worker = get_worker_by_id(user_id)
+    if not worker:
+        await update.message.reply_text("⚠️ You're not registered as a worker.")
         return
     
-    # Mark the worker's response as declined for the latest task
-    latest_task = pending_tasks[0]
-    task_id = latest_task['id']
+    # Get all tasks assigned to this worker
+    tasks = get_all_tasks()
+    assigned_tasks = [task for task in tasks if task["assigned_to"] == user_id]
     
-    # Update the task status for this worker
-    update_task_status(task_id, user_id, "declined")
+    if not assigned_tasks:
+        await update.message.reply_text("ℹ️ You have no assigned tasks.")
+        return
     
-    await update.message.reply_text(
-        f"You have declined task #{task_id}. You'll be notified of future tasks."
+    tasks_text = "📋 *Your Assigned Tasks:*\n\n"
+    for task in assigned_tasks:
+        tasks_text += (
+            f"*Task ID:* {task['id']}\n"
+            f"📍 *Address:* {task['address']}\n"
+            f"📆 *Date:* {task['date']}\n"
+            f"🕒 *Time:* {task['time']}\n"
+            f"📄 *Description:* {task['description']}\n\n"
+        )
+    
+    await update.message.reply_text(tasks_text, parse_mode="Markdown")
+
+# Worker: View own stats
+async def my_stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """View worker's own performance stats."""
+    user_id = update.effective_user.id
+    
+    worker = get_worker_by_id(user_id)
+    if not worker:
+        await update.message.reply_text("⚠️ You're not registered as a worker.")
+        return
+    
+    stats = get_worker_stats(user_id)
+    
+    stats_text = (
+        "📊 *Your Performance Stats:*\n\n"
+        f"✅ Tasks accepted: {stats['accepted']}\n"
+        f"❌ Tasks declined: {stats['declined']}\n"
+        f"📊 Acceptance rate: {stats['acceptance_rate']}%"
     )
+    
+    await update.message.reply_text(stats_text, parse_mode="Markdown")
+
+# Handle button callbacks
+async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle button callbacks for accepting/declining tasks."""
+    query = update.callback_query
+    await query.answer()
+    
+    data = query.data.split("_")
+    action = data[0]
+    task_id = int(data[1])
+    
+    user_id = query.from_user.id
+    worker = get_worker_by_id(user_id)
+    
+    if not worker:
+        await query.edit_message_text(
+            text="⚠️ You're not registered as a worker.",
+            reply_markup=None
+        )
+        return
+    
+    task = get_task_by_id(task_id)
+    
+    if not task:
+        await query.edit_message_text(
+            text=f"⚠️ Task with ID {task_id} not found.",
+            reply_markup=None
+        )
+        return
+    
+    if task["assigned_to"]:
+        await query.edit_message_text(
+            text="⚠️ This task has already been assigned to another worker.",
+            reply_markup=None
+        )
+        return
+    
+    if action == "accept":
+        success = update_task_status(task_id, user_id, "accepted")
+        
+        if success:
+            await query.edit_message_text(
+                text=(
+                    f"✅ You've successfully accepted task #{task_id}!\n\n"
+                    f"📍 *Address:* {task['address']}\n"
+                    f"📆 *Date:* {task['date']}\n"
+                    f"🕒 *Time:* {task['time']}\n"
+                    f"📄 *Description:* {task['description']}"
+                ),
+                parse_mode="Markdown",
+                reply_markup=None
+            )
+            
+            # Notify the admin
+            for admin_id in ADMIN_IDS:
+                try:
+                    await context.bot.send_message(
+                        chat_id=admin_id,
+                        text=(
+                            f"✅ Task #{task_id} has been accepted by {worker['username']} (ID: {user_id})!\n\n"
+                            f"📍 *Address:* {task['address']}\n"
+                            f"📆 *Date:* {task['date']}\n"
+                            f"🕒 *Time:* {task['time']}"
+                        ),
+                        parse_mode="Markdown"
+                    )
+                except Exception:
+                    pass  # Ignore if notification fails
+            
+            # Notify other workers that the task is no longer available
+            workers = get_all_workers()
+            for w in workers:
+                if w["id"] != user_id:
+                    try:
+                        await context.bot.send_message(
+                            chat_id=w["id"],
+                            text=f"ℹ️ Task #{task_id} has been assigned to another worker."
+                        )
+                    except Exception:
+                        pass  # Ignore if notification fails
+        else:
+            await query.edit_message_text(
+                text="⚠️ Failed to accept the task. It may have been assigned already.",
+                reply_markup=None
+            )
+    
+    elif action == "decline":
+        success = update_task_status(task_id, user_id, "declined")
+        
+        if success:
+            await query.edit_message_text(
+                text=f"✓ You've declined task #{task_id}.",
+                reply_markup=None
+            )
+            
+            # Notify the admin
+            for admin_id in ADMIN_IDS:
+                try:
+                    await context.bot.send_message(
+                        chat_id=admin_id,
+                        text=f"ℹ️ Task #{task_id} has been declined by {worker['username']} (ID: {user_id})."
+                    )
+                except Exception:
+                    pass  # Ignore if notification fails
+        else:
+            await query.edit_message_text(
+                text="⚠️ Failed to decline the task.",
+                reply_markup=None
+            )
+
+def start_bot():
+    """Function to start the bot - can be imported and used by other modules."""
+    # Create the Application
+    application = Application.builder().token(TOKEN).build()
+    
+    # Add command handlers
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("help", help_command))
+    
+    # Worker command handlers
+    application.add_handler(CommandHandler("accept", accept_task))
+    application.add_handler(CommandHandler("decline", decline_task))
+    application.add_handler(CommandHandler("my_tasks", my_tasks_command))
+    application.add_handler(CommandHandler("my_stats", my_stats_command))
+    
+    # Admin command handlers
+    application.add_handler(CommandHandler("list_workers", list_workers_command))
+    application.add_handler(CommandHandler("list_tasks", list_tasks_command))
+    application.add_handler(CommandHandler("view_stats", view_stats_command))
+    application.add_handler(CommandHandler("remove_worker", remove_worker_command))
+    
+    # Conversation handlers
+    # Create task conversation
+    create_task_conv_handler = ConversationHandler(
+        entry_points=[CommandHandler("create_task", create_task_start)],
+        states={
+            TASK_ADDRESS: [MessageHandler(filters.TEXT & ~filters.COMMAND, task_address)],
+            TASK_DATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, task_date)],
+            TASK_TIME: [MessageHandler(filters.TEXT & ~filters.COMMAND, task_time)],
+            TASK_DESCRIPTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, task_description)],
+        },
+        fallbacks=[CommandHandler("cancel", cancel_task_creation)],
+    )
+    application.add_handler(create_task_conv_handler)
+    
+    # Add worker conversation
+    add_worker_conv_handler = ConversationHandler(
+        entry_points=[CommandHandler("add_worker", add_worker_start)],
+        states={
+            WORKER_USERNAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_worker_id)],
+        },
+        fallbacks=[CommandHandler("cancel", cancel_add_worker)],
+    )
+    application.add_handler(add_worker_conv_handler)
+    
+    # Callback query handler for inline buttons
+    application.add_handler(CallbackQueryHandler(button_callback))
+    
+    # Start the Bot
+    print("Bot started. Press Ctrl+C to stop.")
+    application.run_polling(allowed_updates=Update.ALL_TYPES)
+    return application
+
+def main():
+    """Start the bot (for direct script execution)."""
+    start_bot()
+
+if __name__ == "__main__":
+    main()
