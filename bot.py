@@ -148,10 +148,6 @@ TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 SUPER_ADMIN_IDS = [
     int(id.strip()) for id in os.getenv("SUPER_ADMIN_ID", "0").split(",") if id.strip()
 ]
-<<<<<<< HEAD
-=======
-REGISTRATION_PASSWORD = os.getenv("REGISTRATION_PASSWORD", "12345")  # Default password for user registration
->>>>>>> 11a3517d991ff9245030aa181343c9c2d31cac1c
 
 # Conversation states (only those NOT imported from handlers)
 # Note: TASK_STEP_* states are imported from handlers.tasks
@@ -159,10 +155,6 @@ REGISTRATION_PASSWORD = os.getenv("REGISTRATION_PASSWORD", "12345")  # Default p
 (
     EDIT_TASK_SELECT, EDIT_TASK_FIELD,
     SUPER_MANAGE_USERS_STATE, SUPER_MANAGE_TASKS_STATE,
-<<<<<<< HEAD
-=======
-    REGISTRATION_PASSWORD_INPUT,
->>>>>>> 11a3517d991ff9245030aa181343c9c2d31cac1c
 ) = range(5)
 
 # Initialize database
