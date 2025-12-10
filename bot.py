@@ -1,13 +1,19 @@
 #!/usr/bin/env python3
 """
-Team Task Management Telegram Bot
-This bot allows admins to create tasks, workers to accept/decline them,
-and tracks worker performance in a SQLite database.
+Team Task Management Telegram Bot (v2.1 - Groups & Media Support)
+Hierarchical system: Super Admin > Group Admin > users
+Features: Group management, multi-assignee tasks, media attachments
 """
 import os
+import json
 import logging
-from datetime import datetime
+import warnings
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
+
+# Suppress PTBUserWarning about per_message settings (we intentionally mix handler types)
+warnings.filterwarnings("ignore", message=".*per_message.*")
+
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import (
     Application,
@@ -20,18 +26,114 @@ from telegram.ext import (
 )
 from database import (
     init_db,
-    add_worker,
-    remove_worker,
-    get_all_workers,
+    create_group,
+    get_all_groups,
+    get_group,
+    get_all_users,
+    get_users_without_group,
+    get_group_by_admin_id,
+    update_group_admin,
+    get_group_users,
+    add_user_to_group,
+    remove_user_from_group,
+    get_user_groups,
+    remove_user,
+    get_user_by_id,
+    ban_user,
+    unban_user,
+    delete_user,
+    remove_user_from_all_groups,
+    cancel_user_tasks,
+    user_exists,
+    register_user,
+    is_user_registered,
+    has_user_group,
     create_task,
     get_task_by_id,
+    get_group_tasks,
+    get_user_tasks,
+    update_task_assignment,
     update_task_status,
-    get_all_tasks,
-    get_worker_stats,
-    get_worker_by_id,
-    worker_exists,
+    add_task_media,
+    get_task_media,
+    remove_task_media,
+    set_user_name,
+    update_group_name,
+    delete_group,
+    delete_task,
+    create_registration_request,
+    get_pending_registration_requests,
+    approve_registration_request,
+    reject_registration_request,
+    get_registration_request_by_user_id,
+    get_users_for_task_assignment,
+    get_admin_groups,
 )
-from utils import is_admin
+
+# Import utilities and handlers
+from utils.helpers import (
+    UKR_MONTHS, UKR_DAYS_SHORT, TIME_OPTIONS,
+    generate_calendar, validate_time_format, create_back_button
+)
+from utils.permissions import (
+    is_super_admin, is_group_admin, get_user_group_id, can_edit_task
+)
+from handlers.notifications import (
+    send_task_assignment_notification,
+    send_status_change_notification,
+    send_deadline_reminder
+)
+from handlers.common import start, help_command, cancel, show_main_menu
+from handlers.super_admin import (
+    # Group management
+    super_manage_groups, super_add_group, super_add_group_name_input, super_add_group_confirm,
+    super_rename_group, super_rename_group_input, super_delete_group, super_delete_group_confirm,
+    super_admin_select, super_admin_group_edit, super_change_admin, super_select_new_admin,
+    super_back_to_group, super_edit_group_members, super_edit_member_toggle,
+    super_edit_members_confirm, super_edit_members_back, super_edit_members_apply,
+    super_edit_members_cancel, super_edit_members_page, super_view_group_users,
+    SUPER_ADD_GROUP_NAME, SUPER_RENAME_GROUP_INPUT, WAITING_ADMIN_SELECT, SUPER_EDIT_GROUP_MEMBERS,
+    # User management
+    super_manage_users, super_all_employees_page, super_list_group_users, super_list_no_group_users,
+    super_user_action_menu, super_user_set_name_start, super_user_set_name_input,
+    super_user_edit_groups, super_user_toggle_group, super_user_groups_confirm, super_user_groups_cancel,
+    super_user_ban, super_user_unban, super_user_delete, super_user_delete_confirm,
+    super_add_user, super_user_select_group, super_user_id_input, super_user_name_input,
+    super_confirm_user, super_cancel_user,
+    USER_NAME_INPUT, WAITING_GROUP_SELECT, USER_ID_INPUT, USER_CONFIRM,
+    # Registration management
+    super_view_registration_requests, super_review_registration_request,
+    super_approve_registration_request_handler, super_reject_registration_request_handler,
+)
+
+# Import task handlers
+from handlers.tasks import (
+    # Filters
+    view_tasks_menu, filter_tasks_created, filter_tasks_assigned,
+    filter_tasks_select_group, filter_tasks_group, filter_group_all_tasks,
+    filter_tasks_by_assignee, filter_tasks_all,
+    # Creation + states
+    create_task, task_title_input, task_calendar_navigation, task_date_selected,
+    task_time_selected, task_time_manual_input, task_description_input,
+    task_add_media, task_handle_media_file, task_done_media, task_skip_media,
+    task_toggle_user, task_confirm_users,
+    task_skip_description, task_forward_to_date, task_forward_to_time,
+    task_forward_to_description, task_forward_to_media,
+    task_back_to_title, task_back_to_date, task_back_to_time, task_back_to_description,
+    cancel_task_creation,
+    TASK_STEP_TITLE, TASK_STEP_DATE, TASK_STEP_TIME, TASK_STEP_DESCRIPTION,
+    TASK_STEP_MEDIA, TASK_STEP_USERS,
+    # Viewing
+    view_task_detail, view_task_media,
+    # Editing
+    edit_task_handler, delete_task_handler, delete_task_confirm_handler,
+    change_task_status_handler, set_task_status_handler,
+)
+
+# Import group_admin and worker handlers
+from handlers.group_admin import admin_view_tasks, super_manage_tasks, admin_manage_users
+from handlers.workers import user_my_tasks, user_stats
+from handlers.registration import start_registration
 
 # Enable logging
 logging.basicConfig(
@@ -42,732 +144,349 @@ logger = logging.getLogger(__name__)
 # Load environment variables
 load_dotenv()
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-ADMIN_IDS = [int(id) for id in os.getenv("ADMIN_IDS", "").split(",") if id]
+# Parse super admin IDs from comma-separated string
+SUPER_ADMIN_IDS = [
+    int(id.strip()) for id in os.getenv("SUPER_ADMIN_ID", "0").split(",") if id.strip()
+]
 
-# States for conversation handlers
-TASK_ADDRESS, TASK_DATE, TASK_TIME, TASK_DESCRIPTION = range(4)
-WORKER_USERNAME = range(1)
+# Conversation states (only those NOT imported from handlers)
+# Note: TASK_STEP_* states are imported from handlers.tasks
+# Note: SUPER_* states are imported from handlers.super_admin
+(
+    EDIT_TASK_SELECT, EDIT_TASK_FIELD,
+    SUPER_MANAGE_USERS_STATE, SUPER_MANAGE_TASKS_STATE,
+) = range(5)
 
 # Initialize database
 init_db()
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Send a message when the command /start is issued."""
-    user_id = update.effective_user.id
-    user_name = update.effective_user.first_name
-    
-    if is_admin(user_id, ADMIN_IDS):
-        message = (
-            f"👋 Welcome, Admin {user_name}!\n\n"
-            "🔹 Use /create_task to add a new task\n"
-            "🔹 Use /add_worker to register a new worker\n"
-            "🔹 Use /remove_worker to unregister a worker\n"
-            "🔹 Use /list_workers to see all registered workers\n"
-            "🔹 Use /list_tasks to see all tasks\n"
-            "🔹 Use /view_stats to check worker performance\n"
-            "🔹 Use /help for more information"
-        )
-    else:
-        # Add worker to database if they don't exist yet
-        if not worker_exists(user_id):
-            username = update.effective_user.username or user_name
-            add_worker(user_id, username)
-            
-        message = (
-            f"👋 Welcome, {user_name}!\n\n"
-            "You'll receive task notifications when they're available.\n"
-            "🔹 Use /accept to accept a task\n"
-            "🔹 Use /decline to decline a task\n"
-            "🔹 Use /my_tasks to see your assigned tasks\n"
-            "🔹 Use /my_stats to see your performance\n"
-            "🔹 Use /help for more information"
-        )
-    
-    await update.message.reply_text(message)
 
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Send a message when the command /help is issued."""
-    user_id = update.effective_user.id
-    
-    if is_admin(user_id, ADMIN_IDS):
-        message = (
-            "📋 *Admin Commands:*\n"
-            "/create_task - Create a new task\n"
-            "/add_worker - Register a new worker\n"
-            "/remove_worker - Unregister a worker\n"
-            "/list_workers - View all registered workers\n"
-            "/list_tasks - View all tasks\n"
-            "/view_stats - View worker performance stats\n"
-            "/help - Show this help message\n"
-        )
-    else:
-        message = (
-            "📋 *Worker Commands:*\n"
-            "/accept - Accept a task (with task ID)\n"
-            "/decline - Decline a task (with task ID)\n"
-            "/my_tasks - View your assigned tasks\n"
-            "/my_stats - View your performance stats\n"
-            "/help - Show this help message\n"
-        )
-    
-    await update.message.reply_text(message, parse_mode="Markdown")
-
-# Admin: Create task conversation handler
-async def create_task_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Start the task creation process."""
-    user_id = update.effective_user.id
-    
-    if not is_admin(user_id, ADMIN_IDS):
-        await update.message.reply_text("⚠️ You don't have admin privileges.")
-        return ConversationHandler.END
-    
-    await update.message.reply_text("📍 Please enter the task address:")
-    return TASK_ADDRESS
-
-async def task_address(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Store task address and ask for date."""
-    context.user_data["address"] = update.message.text
-    await update.message.reply_text(
-        "📆 Please enter the task date (YYYY-MM-DD):"
-    )
-    return TASK_DATE
-
-async def task_date(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Store task date and ask for time."""
-    date_text = update.message.text
-    
-    # Validate date format
-    try:
-        datetime.strptime(date_text, "%Y-%m-%d")
-        context.user_data["date"] = date_text
-        await update.message.reply_text(
-            "🕒 Please enter the task time (HH:MM):"
-        )
-        return TASK_TIME
-    except ValueError:
-        await update.message.reply_text(
-            "⚠️ Invalid date format. Please use YYYY-MM-DD (e.g., 2023-12-31):"
-        )
-        return TASK_DATE
-
-async def task_time(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Store task time and ask for description."""
-    time_text = update.message.text
-    
-    # Validate time format
-    try:
-        datetime.strptime(time_text, "%H:%M")
-        context.user_data["time"] = time_text
-        await update.message.reply_text(
-            "📝 Please enter the task description:"
-        )
-        return TASK_DESCRIPTION
-    except ValueError:
-        await update.message.reply_text(
-            "⚠️ Invalid time format. Please use HH:MM (e.g., 14:30):"
-        )
-        return TASK_TIME
-
-async def task_description(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Store task description and create task in database."""
-    context.user_data["description"] = update.message.text
-    
-    # Create task in database
-    task_id = create_task(
-        context.user_data["address"],
-        context.user_data["date"],
-        context.user_data["time"],
-        context.user_data["description"]
-    )
-    
-    # Send confirmation message to admin
-    await update.message.reply_text(
-        f"✅ Task created successfully!\n\n"
-        f"📝 *Task ID:* {task_id}\n"
-        f"📍 *Address:* {context.user_data['address']}\n"
-        f"📆 *Date:* {context.user_data['date']}\n"
-        f"🕒 *Time:* {context.user_data['time']}\n"
-        f"📄 *Description:* {context.user_data['description']}",
-        parse_mode="Markdown"
-    )
-    
-    # Broadcast task to all workers
-    workers = get_all_workers()
-    task_details = (
-        f"🆕 *New Task Available*\n\n"
-        f"📝 *Task ID:* {task_id}\n"
-        f"📍 *Address:* {context.user_data['address']}\n"
-        f"📆 *Date:* {context.user_data['date']}\n"
-        f"🕒 *Time:* {context.user_data['time']}\n"
-        f"📄 *Description:* {context.user_data['description']}\n\n"
-        f"Use /accept {task_id} to accept this task or /decline {task_id} to decline."
-    )
-    
-    keyboard = [
-        [
-            InlineKeyboardButton("Accept ✅", callback_data=f"accept_{task_id}"),
-            InlineKeyboardButton("Decline ❌", callback_data=f"decline_{task_id}")
-        ]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    broadcast_count = 0
-    for worker in workers:
-        try:
-            await context.bot.send_message(
-                chat_id=worker["id"],
-                text=task_details,
-                parse_mode="Markdown",
-                reply_markup=reply_markup
-            )
-            broadcast_count += 1
-        except Exception as e:
-            logger.error(f"Failed to send task to worker {worker['id']}: {e}")
-    
-    await update.message.reply_text(
-        f"📢 Task broadcast to {broadcast_count} workers."
-    )
-    
-    # Clear user data
-    context.user_data.clear()
-    return ConversationHandler.END
-
-async def cancel_task_creation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Cancel the task creation process."""
-    await update.message.reply_text("❌ Task creation cancelled.")
-    context.user_data.clear()
-    return ConversationHandler.END
-
-# Admin: Add worker conversation handler
-async def add_worker_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Start the process to add a worker."""
-    user_id = update.effective_user.id
-    
-    if not is_admin(user_id, ADMIN_IDS):
-        await update.message.reply_text("⚠️ You don't have admin privileges.")
-        return ConversationHandler.END
-    
-    await update.message.reply_text(
-        "Please enter the Telegram ID of the worker to add.\n"
-        "(Note: The worker needs to start the bot first)"
-    )
-    return WORKER_USERNAME
-
-async def add_worker_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Process worker ID and add to database."""
-    try:
-        worker_id = int(update.message.text.strip())
-        worker_name = f"Worker-{worker_id}"
-        
-        # Add worker to database
-        success = add_worker(worker_id, worker_name)
-        
-        if success:
-            await update.message.reply_text(f"✅ Worker with ID {worker_id} added successfully!")
-            
-            # Notify the worker
-            try:
-                await context.bot.send_message(
-                    chat_id=worker_id,
-                    text="✅ You have been added as a worker by an admin. You'll now receive task notifications."
-                )
-            except Exception as e:
-                await update.message.reply_text(
-                    f"⚠️ Worker added, but notification failed: {str(e)}\n"
-                    "Make sure the worker has started a conversation with the bot."
-                )
-        else:
-            await update.message.reply_text(f"ℹ️ Worker with ID {worker_id} already exists.")
-        
-        return ConversationHandler.END
-    except ValueError:
-        await update.message.reply_text("⚠️ Invalid worker ID. Please enter a valid numerical Telegram ID:")
-        return WORKER_USERNAME
-
-async def cancel_add_worker(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Cancel the worker addition process."""
-    await update.message.reply_text("❌ Worker addition cancelled.")
-    return ConversationHandler.END
-
-# Admin: Remove worker command
-async def remove_worker_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Remove a worker from the system."""
-    user_id = update.effective_user.id
-    
-    if not is_admin(user_id, ADMIN_IDS):
-        await update.message.reply_text("⚠️ You don't have admin privileges.")
-        return
-    
-    if not context.args:
-        await update.message.reply_text("⚠️ Please provide a worker ID: /remove_worker [worker_id]")
-        return
-    
-    try:
-        worker_id = int(context.args[0])
-        success = remove_worker(worker_id)
-        
-        if success:
-            await update.message.reply_text(f"✅ Worker with ID {worker_id} removed successfully!")
-            
-            # Notify the worker
-            try:
-                await context.bot.send_message(
-                    chat_id=worker_id,
-                    text="ℹ️ You have been removed as a worker by an admin. You'll no longer receive task notifications."
-                )
-            except Exception:
-                pass  # Ignore if notification fails
-        else:
-            await update.message.reply_text(f"⚠️ Worker with ID {worker_id} not found.")
-    except ValueError:
-        await update.message.reply_text("⚠️ Invalid worker ID. Please provide a valid numerical ID.")
-
-# Admin: List workers command
-async def list_workers_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """List all registered workers."""
-    user_id = update.effective_user.id
-    
-    if not is_admin(user_id, ADMIN_IDS):
-        await update.message.reply_text("⚠️ You don't have admin privileges.")
-        return
-    
-    workers = get_all_workers()
-    
-    if not workers:
-        await update.message.reply_text("ℹ️ No workers registered yet.")
-        return
-    
-    workers_text = "👥 *Registered Workers:*\n\n"
-    for i, worker in enumerate(workers, 1):
-        workers_text += f"{i}. ID: {worker['id']} - {worker['username']}\n"
-    
-    await update.message.reply_text(workers_text, parse_mode="Markdown")
-
-# Admin: List tasks command
-async def list_tasks_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """List all tasks."""
-    user_id = update.effective_user.id
-    
-    if not is_admin(user_id, ADMIN_IDS):
-        await update.message.reply_text("⚠️ You don't have admin privileges.")
-        return
-    
-    tasks = get_all_tasks()
-    
-    if not tasks:
-        await update.message.reply_text("ℹ️ No tasks created yet.")
-        return
-    
-    tasks_text = "📋 *All Tasks:*\n\n"
-    for task in tasks:
-        status = "✅ Assigned" if task["assigned_to"] else "⏳ Pending"
-        assigned_to = f"👤 Assigned to: {task['assigned_to']}" if task["assigned_to"] else ""
-        
-        tasks_text += (
-            f"*Task ID:* {task['id']}\n"
-            f"📍 *Address:* {task['address']}\n"
-            f"📆 *Date:* {task['date']}\n"
-            f"🕒 *Time:* {task['time']}\n"
-            f"📄 *Description:* {task['description']}\n"
-            f"🔄 *Status:* {status}\n"
-            f"{assigned_to}\n\n"
-        )
-    
-    # Split message if it's too long
-    if len(tasks_text) > 4000:
-        task_chunks = []
-        current_chunk = "📋 *All Tasks:*\n\n"
-        
-        for task in tasks:
-            status = "✅ Assigned" if task["assigned_to"] else "⏳ Pending"
-            assigned_to = f"👤 Assigned to: {task['assigned_to']}" if task["assigned_to"] else ""
-            
-            task_text = (
-                f"*Task ID:* {task['id']}\n"
-                f"📍 *Address:* {task['address']}\n"
-                f"📆 *Date:* {task['date']}\n"
-                f"🕒 *Time:* {task['time']}\n"
-                f"📄 *Description:* {task['description']}\n"
-                f"🔄 *Status:* {status}\n"
-                f"{assigned_to}\n\n"
-            )
-            
-            if len(current_chunk) + len(task_text) > 4000:
-                task_chunks.append(current_chunk)
-                current_chunk = "📋 *All Tasks (continued):*\n\n" + task_text
-            else:
-                current_chunk += task_text
-        
-        task_chunks.append(current_chunk)
-        
-        for chunk in task_chunks:
-            await update.message.reply_text(chunk, parse_mode="Markdown")
-    else:
-        await update.message.reply_text(tasks_text, parse_mode="Markdown")
-
-# Admin: View worker stats command
-async def view_stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """View performance stats for all workers."""
-    user_id = update.effective_user.id
-    
-    if not is_admin(user_id, ADMIN_IDS):
-        await update.message.reply_text("⚠️ You don't have admin privileges.")
-        return
-    
-    workers = get_all_workers()
-    
-    if not workers:
-        await update.message.reply_text("ℹ️ No workers registered yet.")
-        return
-    
-    stats_text = "📊 *Worker Performance Stats:*\n\n"
-    for worker in workers:
-        stats = get_worker_stats(worker["id"])
-        stats_text += (
-            f"👤 *{worker['username']}* (ID: {worker['id']})\n"
-            f"✅ Tasks accepted: {stats['accepted']}\n"
-            f"❌ Tasks declined: {stats['declined']}\n"
-            f"📊 Acceptance rate: {stats['acceptance_rate']}%\n\n"
-        )
-    
-    await update.message.reply_text(stats_text, parse_mode="Markdown")
-
-# Worker: Handle task acceptance
-async def accept_task(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle worker accepting a task."""
-    user_id = update.effective_user.id
-    
-    # Check if command has task_id argument
-    if not context.args:
-        await update.message.reply_text("⚠️ Please specify a task ID: /accept [task_id]")
-        return
-    
-    try:
-        task_id = int(context.args[0])
-        task = get_task_by_id(task_id)
-        
-        if not task:
-            await update.message.reply_text(f"⚠️ Task with ID {task_id} not found.")
-            return
-        
-        if task["assigned_to"]:
-            await update.message.reply_text("⚠️ This task has already been assigned to another worker.")
-            return
-        
-        # Update task as accepted
-        worker = get_worker_by_id(user_id)
-        if not worker:
-            await update.message.reply_text("⚠️ You're not registered as a worker.")
-            return
-        
-        success = update_task_status(task_id, user_id, "accepted")
-        
-        if success:
-            # Notify the worker
-            await update.message.reply_text(
-                f"✅ You've successfully accepted task #{task_id}!\n\n"
-                f"📍 *Address:* {task['address']}\n"
-                f"📆 *Date:* {task['date']}\n"
-                f"🕒 *Time:* {task['time']}\n"
-                f"📄 *Description:* {task['description']}",
-                parse_mode="Markdown"
-            )
-            
-            # Notify the admin
-            for admin_id in ADMIN_IDS:
-                try:
-                    await context.bot.send_message(
-                        chat_id=admin_id,
-                        text=(
-                            f"✅ Task #{task_id} has been accepted by {worker['username']} (ID: {user_id})!\n\n"
-                            f"📍 *Address:* {task['address']}\n"
-                            f"📆 *Date:* {task['date']}\n"
-                            f"🕒 *Time:* {task['time']}",
-                        ),
-                        parse_mode="Markdown"
-                    )
-                except Exception:
-                    pass  # Ignore if notification fails
-            
-            # Notify other workers that the task is no longer available
-            workers = get_all_workers()
-            for w in workers:
-                if w["id"] != user_id:
-                    try:
-                        await context.bot.send_message(
-                            chat_id=w["id"],
-                            text=f"ℹ️ Task #{task_id} has been assigned to another worker."
-                        )
-                    except Exception:
-                        pass  # Ignore if notification fails
-        else:
-            await update.message.reply_text("⚠️ Failed to accept the task. It may have been assigned already.")
-    except ValueError:
-        await update.message.reply_text("⚠️ Invalid task ID. Please provide a valid numerical ID.")
-
-# Worker: Handle task decline
-async def decline_task(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle worker declining a task."""
-    user_id = update.effective_user.id
-    
-    # Check if command has task_id argument
-    if not context.args:
-        await update.message.reply_text("⚠️ Please specify a task ID: /decline [task_id]")
-        return
-    
-    try:
-        task_id = int(context.args[0])
-        task = get_task_by_id(task_id)
-        
-        if not task:
-            await update.message.reply_text(f"⚠️ Task with ID {task_id} not found.")
-            return
-        
-        if task["assigned_to"]:
-            await update.message.reply_text("⚠️ This task has already been assigned to another worker.")
-            return
-        
-        # Update task as declined for this worker
-        worker = get_worker_by_id(user_id)
-        if not worker:
-            await update.message.reply_text("⚠️ You're not registered as a worker.")
-            return
-        
-        success = update_task_status(task_id, user_id, "declined")
-        
-        if success:
-            await update.message.reply_text(f"✓ You've declined task #{task_id}.")
-            
-            # Notify the admin
-            for admin_id in ADMIN_IDS:
-                try:
-                    await context.bot.send_message(
-                        chat_id=admin_id,
-                        text=f"ℹ️ Task #{task_id} has been declined by {worker['username']} (ID: {user_id})."
-                    )
-                except Exception:
-                    pass  # Ignore if notification fails
-        else:
-            await update.message.reply_text("⚠️ Failed to decline the task.")
-    except ValueError:
-        await update.message.reply_text("⚠️ Invalid task ID. Please provide a valid numerical ID.")
-
-# Worker: View assigned tasks
-async def my_tasks_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """View tasks assigned to the worker."""
-    user_id = update.effective_user.id
-    
-    worker = get_worker_by_id(user_id)
-    if not worker:
-        await update.message.reply_text("⚠️ You're not registered as a worker.")
-        return
-    
-    # Get all tasks assigned to this worker
-    tasks = get_all_tasks()
-    assigned_tasks = [task for task in tasks if task["assigned_to"] == user_id]
-    
-    if not assigned_tasks:
-        await update.message.reply_text("ℹ️ You have no assigned tasks.")
-        return
-    
-    tasks_text = "📋 *Your Assigned Tasks:*\n\n"
-    for task in assigned_tasks:
-        tasks_text += (
-            f"*Task ID:* {task['id']}\n"
-            f"📍 *Address:* {task['address']}\n"
-            f"📆 *Date:* {task['date']}\n"
-            f"🕒 *Time:* {task['time']}\n"
-            f"📄 *Description:* {task['description']}\n\n"
-        )
-    
-    await update.message.reply_text(tasks_text, parse_mode="Markdown")
-
-# Worker: View own stats
-async def my_stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """View worker's own performance stats."""
-    user_id = update.effective_user.id
-    
-    worker = get_worker_by_id(user_id)
-    if not worker:
-        await update.message.reply_text("⚠️ You're not registered as a worker.")
-        return
-    
-    stats = get_worker_stats(user_id)
-    
-    stats_text = (
-        "📊 *Your Performance Stats:*\n\n"
-        f"✅ Tasks accepted: {stats['accepted']}\n"
-        f"❌ Tasks declined: {stats['declined']}\n"
-        f"📊 Acceptance rate: {stats['acceptance_rate']}%"
-    )
-    
-    await update.message.reply_text(stats_text, parse_mode="Markdown")
-
-# Handle button callbacks
-async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle button callbacks for accepting/declining tasks."""
+# ============================================================================
+async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle inline button callbacks."""
     query = update.callback_query
-    await query.answer()
-    
-    data = query.data.split("_")
-    action = data[0]
-    task_id = int(data[1])
-    
-    user_id = query.from_user.id
-    worker = get_worker_by_id(user_id)
-    
-    if not worker:
-        await query.edit_message_text(
-            text="⚠️ You're not registered as a worker.",
-            reply_markup=None
-        )
-        return
-    
-    task = get_task_by_id(task_id)
-    
-    if not task:
-        await query.edit_message_text(
-            text=f"⚠️ Task with ID {task_id} not found.",
-            reply_markup=None
-        )
-        return
-    
-    if task["assigned_to"]:
-        await query.edit_message_text(
-            text="⚠️ This task has already been assigned to another worker.",
-            reply_markup=None
-        )
-        return
-    
-    if action == "accept":
-        success = update_task_status(task_id, user_id, "accepted")
-        
-        if success:
-            await query.edit_message_text(
-                text=(
-                    f"✅ You've successfully accepted task #{task_id}!\n\n"
-                    f"📍 *Address:* {task['address']}\n"
-                    f"📆 *Date:* {task['date']}\n"
-                    f"🕒 *Time:* {task['time']}\n"
-                    f"📄 *Description:* {task['description']}"
-                ),
-                parse_mode="Markdown",
-                reply_markup=None
-            )
-            
-            # Notify the admin
-            for admin_id in ADMIN_IDS:
-                try:
-                    await context.bot.send_message(
-                        chat_id=admin_id,
-                        text=(
-                            f"✅ Task #{task_id} has been accepted by {worker['username']} (ID: {user_id})!\n\n"
-                            f"📍 *Address:* {task['address']}\n"
-                            f"📆 *Date:* {task['date']}\n"
-                            f"🕒 *Time:* {task['time']}"
-                        ),
-                        parse_mode="Markdown"
-                    )
-                except Exception:
-                    pass  # Ignore if notification fails
-            
-            # Notify other workers that the task is no longer available
-            workers = get_all_workers()
-            for w in workers:
-                if w["id"] != user_id:
-                    try:
-                        await context.bot.send_message(
-                            chat_id=w["id"],
-                            text=f"ℹ️ Task #{task_id} has been assigned to another worker."
-                        )
-                    except Exception:
-                        pass  # Ignore if notification fails
-        else:
-            await query.edit_message_text(
-                text="⚠️ Failed to accept the task. It may have been assigned already.",
-                reply_markup=None
-            )
-    
-    elif action == "decline":
-        success = update_task_status(task_id, user_id, "declined")
-        
-        if success:
-            await query.edit_message_text(
-                text=f"✓ You've declined task #{task_id}.",
-                reply_markup=None
-            )
-            
-            # Notify the admin
-            for admin_id in ADMIN_IDS:
-                try:
-                    await context.bot.send_message(
-                        chat_id=admin_id,
-                        text=f"ℹ️ Task #{task_id} has been declined by {worker['username']} (ID: {user_id})."
-                    )
-                except Exception:
-                    pass  # Ignore if notification fails
-        else:
-            await query.edit_message_text(
-                text="⚠️ Failed to decline the task.",
-                reply_markup=None
-            )
+    data = query.data
+    # Debug log to trace callback operations (helps diagnose unresponsive buttons)
+    logger.info(f"Натиснуто кнопку: {data} користувачем {query.from_user.id}")
 
+    try:
+        # Registration button
+        if data == "start_registration":
+            return await start_registration(update, context)
+
+        # Start menu (go back home)
+        if data == "start_menu":
+            user_id = query.from_user.id
+            user_name = query.from_user.first_name
+            await show_main_menu(user_id, user_name, update, is_callback=True)
+
+        # Super admin handlers
+        elif data == "super_add_group":
+            await super_add_group(update, context)
+        elif data == "super_add_group_confirm":
+            await super_add_group_confirm(update, context)
+        elif data == "super_manage_groups":
+            await super_manage_groups(update, context)
+        elif data == "super_rename_group":
+            return await super_rename_group(update, context)
+        elif data == "super_delete_group":
+            await super_delete_group(update, context)
+        elif data == "super_delete_group_confirm":
+            await super_delete_group_confirm(update, context)
+        elif data == "super_admin_group_edit":
+            await super_admin_group_edit(update, context)
+        elif data.startswith("super_admin_select_"):
+            await super_admin_select(update, context)
+        elif data == "super_change_admin":
+            return await super_change_admin(update, context)
+        elif data.startswith("super_select_new_admin_"):
+            return await super_select_new_admin(update, context)
+        elif data == "super_back_to_group":
+            await super_back_to_group(update, context)
+        elif data == "super_manage_users":
+            return await super_manage_users(update, context)
+        elif data.startswith("super_all_employees_page_"):
+            await super_all_employees_page(update, context)
+        elif data == "super_add_user":
+            return await super_add_user(update, context)
+        elif data.startswith("super_user_select_group_"):
+            return await super_user_select_group(update, context)
+        elif data == "super_confirm_user":
+            return await super_confirm_user(update, context)
+        elif data == "super_cancel_user":
+            return await super_cancel_user(update, context)
+        elif data == "super_manage_tasks":
+            await super_manage_tasks(update, context)
+        elif data == "super_view_group_users":
+            await super_view_group_users(update, context)
+        elif data.startswith("super_users_group_"):
+            return await super_list_group_users(update, context)
+        elif data == "super_users_no_group":
+            return await super_list_no_group_users(update, context)
+        elif data.startswith("super_user_") and data.count("_") == 2 and data.startswith("super_user_"):
+            return await super_user_action_menu(update, context)
+        elif data.startswith("super_user_set_name_"):
+            return await super_user_set_name_start(update, context)
+        elif data.startswith("super_user_edit_groups_"):
+            return await super_user_edit_groups(update, context)
+        elif data.startswith("super_user_toggle_group_"):
+            return await super_user_toggle_group(update, context)
+        elif data.startswith("super_user_groups_confirm_"):
+            return await super_user_groups_confirm(update, context)
+        elif data.startswith("super_user_groups_cancel_"):
+            return await super_user_groups_cancel(update, context)
+        elif data.startswith("super_user_ban_"):
+            return await super_user_ban(update, context)
+        elif data.startswith("super_user_unban_"):
+            return await super_user_unban(update, context)
+        elif data.startswith("super_user_delete_confirm_"):
+            return await super_user_delete_confirm(update, context)
+        elif data.startswith("super_user_delete_"):
+            return await super_user_delete(update, context)
+        
+        # Registration request handlers
+        elif data == "super_view_registration_requests":
+            await super_view_registration_requests(update, context)
+        elif data.startswith("super_review_request_"):
+            await super_review_registration_request(update, context)
+        elif data.startswith("super_approve_request_"):
+            await super_approve_registration_request_handler(update, context)
+        elif data.startswith("super_reject_request_"):
+            await super_reject_registration_request_handler(update, context)
+
+        # Admin handlers
+        elif data == "admin_create_task" or data == "create_task":
+            return await create_task(update, context)
+        elif data == "admin_view_tasks":
+            await admin_view_tasks(update, context)
+        elif data == "admin_manage_users":
+            await admin_manage_users(update, context)
+        elif data == "admin_add_user":
+            await query.answer()
+            # TODO: Implement add user
+
+        # Unified tasks menu with filters
+        elif data == "view_tasks_menu":
+            await view_tasks_menu(update, context)
+        elif data == "filter_tasks_created":
+            await filter_tasks_created(update, context)
+        elif data == "filter_tasks_assigned":
+            await filter_tasks_assigned(update, context)
+        elif data == "filter_tasks_select_group":
+            await filter_tasks_select_group(update, context)
+        elif data.startswith("filter_tasks_group_"):
+            await filter_tasks_group(update, context)
+        elif data.startswith("filter_group_all_tasks_"):
+            await filter_group_all_tasks(update, context)
+        elif data.startswith("filter_tasks_assignee_"):
+            await filter_tasks_by_assignee(update, context)
+        elif data == "filter_tasks_all":
+            await filter_tasks_all(update, context)
+
+        # Note: task_add_media, task_skip_media, task_toggle_user, task_confirm_users,
+        # and cancel_task_creation are handled by ConversationHandler for task creation.
+        # Do not route them here to avoid conflicts with conversation state.
+
+        # Task viewing handlers
+        elif data.startswith("view_task_media_"):
+            await view_task_media(update, context)
+        elif data.startswith("view_task_"):
+            await view_task_detail(update, context)
+        
+        # Task editing/deletion handlers
+        elif data.startswith("delete_task_confirm_"):
+            await delete_task_confirm_handler(update, context)
+        elif data.startswith("delete_task_"):
+            await delete_task_handler(update, context)
+        elif data.startswith("edit_task_"):
+            await edit_task_handler(update, context)
+        
+        # Task status change handlers
+        elif data.startswith("set_task_status_"):
+            await set_task_status_handler(update, context)
+        elif data.startswith("change_task_status_"):
+            await change_task_status_handler(update, context)
+        
+        # user handlers
+        elif data == "user_my_tasks":
+            await user_my_tasks(update, context)
+        elif data == "user_stats":
+            await user_stats(update, context)
+
+        else:
+            await query.answer()
+
+    except Exception as e:
+        logger.exception("Error while handling callback '%s': %s", data, e)
+        try:
+            await query.answer("❌ Виникла помилка під час обробки вашої дії. Помилка була зафіксована.")
+        except Exception:
+            pass
+        return None
+
+
+# ============================================================================
 def start_bot():
-    """Function to start the bot - can be imported and used by other modules."""
-    # Create the Application
+    """Start the bot."""
     application = Application.builder().token(TOKEN).build()
     
-    # Add command handlers
+    # Command handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
     
-    # Worker command handlers
-    application.add_handler(CommandHandler("accept", accept_task))
-    application.add_handler(CommandHandler("decline", decline_task))
-    application.add_handler(CommandHandler("my_tasks", my_tasks_command))
-    application.add_handler(CommandHandler("my_stats", my_stats_command))
-    
-    # Admin command handlers
-    application.add_handler(CommandHandler("list_workers", list_workers_command))
-    application.add_handler(CommandHandler("list_tasks", list_tasks_command))
-    application.add_handler(CommandHandler("view_stats", view_stats_command))
-    application.add_handler(CommandHandler("remove_worker", remove_worker_command))
-    
-    # Conversation handlers
-    # Create task conversation
-    create_task_conv_handler = ConversationHandler(
-        entry_points=[CommandHandler("create_task", create_task_start)],
+    # Task creation conversation
+    task_conv_handler = ConversationHandler(
+        entry_points=[CallbackQueryHandler(create_task, pattern="^(create_task|admin_create_task)$")],
+        per_message=False,
         states={
-            TASK_ADDRESS: [MessageHandler(filters.TEXT & ~filters.COMMAND, task_address)],
-            TASK_DATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, task_date)],
-            TASK_TIME: [MessageHandler(filters.TEXT & ~filters.COMMAND, task_time)],
-            TASK_DESCRIPTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, task_description)],
+            TASK_STEP_TITLE: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, task_title_input),
+                CallbackQueryHandler(task_forward_to_date, pattern="^task_forward_to_date$"),
+                CallbackQueryHandler(cancel_task_creation, pattern="^cancel_task_creation$"),
+            ],
+            TASK_STEP_DATE: [
+                CallbackQueryHandler(task_calendar_navigation, pattern="^cal_(prev|next)_.*"),
+                CallbackQueryHandler(task_date_selected, pattern="^cal_select_.*"),
+                CallbackQueryHandler(task_back_to_title, pattern="^task_back_to_title$"),
+                CallbackQueryHandler(task_forward_to_time, pattern="^task_forward_to_time$"),
+                CallbackQueryHandler(cancel_task_creation, pattern="^cancel_task_creation$"),
+                CallbackQueryHandler(lambda u, c: u.callback_query.answer(), pattern="^cal_ignore$"),
+            ],
+            TASK_STEP_TIME: [
+                CallbackQueryHandler(task_time_selected, pattern="^time_select_.*$"),
+                CallbackQueryHandler(task_back_to_date, pattern="^task_back_to_date$"),
+                CallbackQueryHandler(task_forward_to_description, pattern="^task_forward_to_description$"),
+                CallbackQueryHandler(cancel_task_creation, pattern="^cancel_task_creation$"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, task_time_manual_input),
+            ],
+            TASK_STEP_DESCRIPTION: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, task_description_input),
+                CallbackQueryHandler(task_skip_description, pattern="^task_skip_description$"),
+                CallbackQueryHandler(task_back_to_time, pattern="^task_back_to_time$"),
+                CallbackQueryHandler(task_forward_to_media, pattern="^task_forward_to_media$"),
+                CallbackQueryHandler(cancel_task_creation, pattern="^cancel_task_creation$"),
+            ],
+            TASK_STEP_MEDIA: [
+                CallbackQueryHandler(task_add_media, pattern="^task_add_media$"),
+                CallbackQueryHandler(task_skip_media, pattern="^task_skip_media$"),
+                CallbackQueryHandler(task_back_to_description, pattern="^task_back_to_description$"),
+                CallbackQueryHandler(cancel_task_creation, pattern="^cancel_task_creation$"),
+                MessageHandler(filters.PHOTO | filters.VIDEO | filters.Document.ALL, task_handle_media_file),
+                CommandHandler("done_media", task_done_media),
+            ],
+            TASK_STEP_USERS: [
+                CallbackQueryHandler(task_toggle_user, pattern="^task_toggle_user_.*"),
+                CallbackQueryHandler(task_confirm_users, pattern="^task_confirm_users$"),
+                CallbackQueryHandler(cancel_task_creation, pattern="^cancel_task_creation$"),
+            ],
         },
-        fallbacks=[CommandHandler("cancel", cancel_task_creation)],
+        fallbacks=[CommandHandler("cancel", cancel)],
     )
-    application.add_handler(create_task_conv_handler)
+    application.add_handler(task_conv_handler)
     
-    # Add worker conversation
-    add_worker_conv_handler = ConversationHandler(
-        entry_points=[CommandHandler("add_worker", add_worker_start)],
+    # Super admin change admin conversation
+    change_admin_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(super_change_admin, pattern="^super_change_admin$")],
+        per_message=False,
         states={
-            WORKER_USERNAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_worker_id)],
+            WAITING_ADMIN_SELECT: [
+                CallbackQueryHandler(super_select_new_admin, pattern="^super_select_new_admin_.*"),
+                CallbackQueryHandler(super_back_to_group, pattern="^super_back_to_group$"),
+            ],
         },
-        fallbacks=[CommandHandler("cancel", cancel_add_worker)],
+        fallbacks=[CommandHandler("cancel", cancel)],
     )
-    application.add_handler(add_worker_conv_handler)
+    application.add_handler(change_admin_conv)
+
+    # Super admin edit group members conversation
+    edit_members_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(super_edit_group_members, pattern="^super_edit_group_members$")],
+        per_message=False,
+        states={
+            SUPER_EDIT_GROUP_MEMBERS: [
+                CallbackQueryHandler(super_edit_member_toggle, pattern="^super_edit_member_toggle_.*"),
+                CallbackQueryHandler(super_edit_members_confirm, pattern="^super_edit_members_confirm$"),
+                CallbackQueryHandler(super_edit_members_cancel, pattern="^super_edit_members_cancel$"),
+                CallbackQueryHandler(super_edit_members_back, pattern="^super_edit_members_back$"),
+                CallbackQueryHandler(super_edit_members_apply, pattern="^super_edit_members_apply$"),
+                CallbackQueryHandler(super_edit_members_page, pattern="^super_edit_members_page_.*$"),
+            ],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+    )
+    application.add_handler(edit_members_conv)
     
-    # Callback query handler for inline buttons
+    # Super admin add user conversation
+    super_add_user_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(super_add_user, pattern="^super_add_user$")],
+        per_message=False,
+        states={
+            WAITING_GROUP_SELECT: [
+                CallbackQueryHandler(super_user_select_group, pattern="^super_user_select_group_.*"),
+                CallbackQueryHandler(lambda u, c: None, pattern="^super_manage_users$"),
+            ],
+            USER_ID_INPUT: [MessageHandler(filters.TEXT & ~filters.COMMAND, super_user_id_input)],
+            USER_NAME_INPUT: [MessageHandler(filters.TEXT & ~filters.COMMAND, super_user_name_input)],
+            USER_CONFIRM: [
+                CallbackQueryHandler(super_confirm_user, pattern="^super_confirm_user$"),
+                CallbackQueryHandler(super_cancel_user, pattern="^super_cancel_user$"),
+            ],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+    )
+    application.add_handler(super_add_user_conv)
+
+    # Super admin add group conversation
+    super_add_group_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(super_add_group, pattern="^super_add_group$")],
+        per_message=False,
+        states={
+            SUPER_ADD_GROUP_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, super_add_group_name_input)],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+    )
+    application.add_handler(super_add_group_conv)
+
+    # Super admin rename group conversation
+    super_rename_group_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(super_rename_group, pattern="^super_rename_group$")],
+        per_message=False,
+        states={
+            SUPER_RENAME_GROUP_INPUT: [MessageHandler(filters.TEXT & ~filters.COMMAND, super_rename_group_input)],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+    )
+    application.add_handler(super_rename_group_conv)
+
+    # Super admin change user name conversation
+    super_user_set_name_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(super_user_set_name_start, pattern="^super_user_set_name_.*")],
+        per_message=False,
+        states={
+            USER_NAME_INPUT: [MessageHandler(filters.TEXT & ~filters.COMMAND, super_user_set_name_input)],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+    )
+    application.add_handler(super_user_set_name_conv)
+    
+    # Callback query handler for buttons
     application.add_handler(CallbackQueryHandler(button_callback))
     
-    # Start the Bot
-    print("Bot started. Press Ctrl+C to stop.")
+    # Schedule deadline reminders (check every 30 minutes)
+    job_queue = application.job_queue
+    job_queue.run_repeating(send_deadline_reminder, interval=1800, first=10)  # 1800 seconds = 30 minutes
+    
+    # Start polling
+    print("[BOT] Bot started. Press Ctrl+C to stop.")
+    print("[BOT] Deadline reminder job scheduled (checks every 30 minutes)")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
     return application
 
+
 def main():
-    """Start the bot (for direct script execution)."""
+    """Main entry point."""
     start_bot()
+
 
 if __name__ == "__main__":
     main()

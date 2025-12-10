@@ -1,0 +1,899 @@
+﻿"""Task creation handlers - conversation flow for creating tasks."""
+
+import logging
+import re
+from datetime import datetime
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ContextTypes, ConversationHandler
+
+from database import (
+    get_all_groups, get_all_users, get_user_by_id, user_exists,
+    add_task_media, get_users_for_task_assignment, get_admin_groups
+)
+from utils.permissions import is_super_admin, is_group_admin, get_user_group_id
+from utils.helpers import generate_calendar, UKR_MONTHS, TIME_OPTIONS
+from handlers.notifications import send_task_assignment_notification
+
+logger = logging.getLogger(__name__)
+
+# Conversation states  
+TASK_STEP_TITLE = 0
+TASK_STEP_DATE = 1
+TASK_STEP_TIME = 2
+TASK_STEP_DESCRIPTION = 3
+TASK_STEP_MEDIA = 4
+TASK_STEP_USERS = 5
+
+async def create_task(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Start task creation process - available for all registered users."""
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = query.from_user.id
+    
+    # Check if user is registered
+    if not user_exists(user_id):
+        await query.edit_message_text("⚠️ Ви не зареєстровані в системі.")
+        return ConversationHandler.END
+    
+    # Get user's group (if they have one)
+    user_group_id = None
+    if is_group_admin(user_id):
+        user_group_id = get_user_group_id(user_id)
+    else:
+        user = get_user_by_id(user_id)
+        if user and user.get('group_id'):
+            user_group_id = user['group_id']
+    
+    context.user_data["task_data"] = {
+        "admin_id": user_id,  # Creator of the task
+        "group_id": user_group_id,  # Default group (can be changed)
+        "media_files": [],
+        "current_step": 1,  # Track current step
+    }
+    
+    keyboard = [[InlineKeyboardButton("❌ Скасувати", callback_data="cancel_task_creation")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await query.edit_message_text(
+        "📝 Крок 1/5: Введіть назву завдання:",
+        reply_markup=reply_markup
+    )
+    return TASK_STEP_TITLE
+
+
+async def task_title_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Store task name, show calendar for date selection."""
+    context.user_data["task_data"]["description"] = update.message.text
+    context.user_data["task_data"]["current_step"] = 2
+    
+    # Show calendar for current month
+    now = datetime.now()
+    calendar_keyboard = generate_calendar(now.year, now.month)
+    
+    # Add navigation buttons
+    nav_buttons = [InlineKeyboardButton("⬅️ Назад", callback_data="task_back_to_title")]
+    
+    # Show Forward button if user already filled time
+    if "time" in context.user_data["task_data"]:
+        nav_buttons.append(InlineKeyboardButton("➡️ Вперед", callback_data="task_forward_to_time"))
+    
+    nav_buttons.append(InlineKeyboardButton("❌ Скасувати", callback_data="cancel_task_creation"))
+    calendar_keyboard.append(nav_buttons)
+    
+    reply_markup = InlineKeyboardMarkup(calendar_keyboard)
+    
+    await update.message.reply_text(
+        "📆 Крок 2/5: Оберіть дату дедлайну:",
+        reply_markup=reply_markup
+    )
+    return TASK_STEP_DATE
+
+
+async def task_calendar_navigation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle calendar navigation (prev/next month)."""
+    query = update.callback_query
+    await query.answer()
+    
+    data = query.data
+    if data.startswith("cal_prev_"):
+        _, _, year, month = data.split("_")
+        year, month = int(year), int(month)
+        month -= 1
+        if month < 1:
+            month = 12
+            year -= 1
+    elif data.startswith("cal_next_"):
+        _, _, year, month = data.split("_")
+        year, month = int(year), int(month)
+        month += 1
+        if month > 12:
+            month = 1
+            year += 1
+    else:
+        return TASK_STEP_DATE
+    
+    calendar_keyboard = generate_calendar(year, month)
+    
+    # Add navigation buttons
+    calendar_keyboard.append([
+        InlineKeyboardButton("⬅️ Назад", callback_data="task_back_to_title"),
+        InlineKeyboardButton("❌ Скасувати", callback_data="cancel_task_creation")
+    ])
+    
+    reply_markup = InlineKeyboardMarkup(calendar_keyboard)
+    
+    await query.edit_message_text(
+        "📆 Крок 2/5: Оберіть дату дедлайну:",
+        reply_markup=reply_markup
+    )
+    return TASK_STEP_DATE
+
+
+async def task_date_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle date selection from calendar."""
+    query = update.callback_query
+    await query.answer()
+    
+    # Parse selected date
+    _, _, year, month, day = query.data.split("_")
+    selected_date = f"{year}-{month.zfill(2)}-{day.zfill(2)}"
+    context.user_data["task_data"]["date"] = selected_date
+    context.user_data["task_data"]["current_step"] = 3
+    
+    # Show time selection - display hours in 4 columns (6 rows)
+    keyboard = []
+    for i in range(0, len(TIME_OPTIONS), 4):
+        row = []
+        for time_opt in TIME_OPTIONS[i:i+4]:
+            row.append(InlineKeyboardButton(time_opt, callback_data=f"time_select_{time_opt}"))
+        keyboard.append(row)
+    
+    # Add navigation buttons
+    keyboard.append([
+        InlineKeyboardButton("⬅️ Назад", callback_data="task_back_to_date"),
+        InlineKeyboardButton("❌ Скасувати", callback_data="cancel_task_creation")
+    ])
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await query.edit_message_text(
+        f"📅 Обрано: {day} {UKR_MONTHS[int(month)-1]} {year}\n\n"
+        f"🕒 Крок 3/5: Оберіть час дедлайну\n\n"
+        f"Або вкажіть час вручну у форматі 00:00",
+        reply_markup=reply_markup
+    )
+    return TASK_STEP_TIME
+
+
+async def task_time_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle time selection from button."""
+    query = update.callback_query
+    await query.answer()
+    
+    # Extract time from callback data
+    _, _, time = query.data.split("_")
+    context.user_data["task_data"]["time"] = time
+    context.user_data["task_data"]["current_step"] = 4
+    
+    keyboard = [
+        [InlineKeyboardButton("⏭️ Пропустити опис", callback_data="task_skip_description")],
+        [InlineKeyboardButton("⬅️ Назад", callback_data="task_back_to_time"),
+         InlineKeyboardButton("❌ Скасувати", callback_data="cancel_task_creation")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await query.edit_message_text(
+        f"✅ Дедлайн: {context.user_data['task_data']['date']} о {context.user_data['task_data']['time']}\n\n"
+        f"📝 Крок 4/5: Введіть детальний опис завдання (опціонально):",
+        reply_markup=reply_markup
+    )
+    return TASK_STEP_DESCRIPTION
+
+
+async def task_time_manual_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle manual time input in format HH:MM."""
+    import re
+    
+    time_text = update.message.text.strip()
+    
+    # Validate time format HH:MM
+    time_pattern = re.compile(r'^([0-1]?[0-9]|2[0-4]):([0-5][0-9])$')
+    match = time_pattern.match(time_text)
+    
+    if not match:
+        await update.message.reply_text(
+            "❌ Невірний формат часу. Будь ласка, введіть час у форматі 00:00 (наприклад: 14:30, 09:00)"
+        )
+        return TASK_STEP_TIME
+    
+    # Normalize time format (add leading zero if needed)
+    hour, minute = match.groups()
+    normalized_time = f"{int(hour):02d}:{minute}"
+    
+    context.user_data["task_data"]["time"] = normalized_time
+    context.user_data["task_data"]["current_step"] = 4
+    
+    keyboard = [
+        [InlineKeyboardButton("⏭️ Пропустити опис", callback_data="task_skip_description")],
+        [InlineKeyboardButton("⬅️ Назад", callback_data="task_back_to_time"),
+         InlineKeyboardButton("❌ Скасувати", callback_data="cancel_task_creation")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await update.message.reply_text(
+        f"✅ Дедлайн: {context.user_data['task_data']['date']} о {normalized_time}\n\n"
+        f"📝 Крок 4/5: Введіть детальний опис завдання (опціонально):",
+        reply_markup=reply_markup
+    )
+    return TASK_STEP_DESCRIPTION
+
+
+async def task_description_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Store detailed description, ask for media."""
+    # Append detailed description to the task name if provided
+    detailed_desc = update.message.text.strip()
+    if detailed_desc:
+        context.user_data["task_data"]["description"] += f"\n\n{detailed_desc}"
+    
+    context.user_data["task_data"]["current_step"] = 5
+    context.user_data["task_data"]["media_visited"] = True
+    
+    keyboard = [
+        [InlineKeyboardButton("📸 Додати фото/відео", callback_data="task_add_media")],
+        [InlineKeyboardButton("⏭️ Пропустити медіа", callback_data="task_skip_media")],
+        [InlineKeyboardButton("⬅️ Назад", callback_data="task_back_to_description"),
+         InlineKeyboardButton("❌ Скасувати", callback_data="cancel_task_creation")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await update.message.reply_text(
+        "🖼️ Крок 5/5: Додайте медіа (фото/відео) або пропустіть:",
+        reply_markup=reply_markup
+    )
+    return TASK_STEP_MEDIA
+
+
+async def task_add_media(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle media upload."""
+    query = update.callback_query
+    await query.answer()
+    
+    context.user_data["task_data"]["waiting_for_media"] = True
+    context.user_data["task_data"]["media_files"] = []
+    
+    await query.edit_message_text(
+        "📸 Надішліть фото або відео (до 20 файлів).\n\n"
+        "Коли закінчите, надішліть /done_media, щоб перейти до вибору користувачів."
+    )
+    return TASK_STEP_MEDIA
+
+
+async def task_handle_media_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle incoming media files."""
+    if "task_data" not in context.user_data or not context.user_data["task_data"].get("waiting_for_media"):
+        return TASK_STEP_MEDIA
+    
+    media_files = context.user_data["task_data"].get("media_files", [])
+    
+    # Check if we've reached 20 files limit
+    if len(media_files) >= 20:
+        await update.message.reply_text("❌ Досягнуто максимум 20 файлів. Надішліть /done_media, щоб продовжити.")
+        return TASK_STEP_MEDIA
+    
+    # Handle photo
+    if update.message.photo:
+        file_id = update.message.photo[-1].file_id  # Get the largest photo
+        media_files.append({
+            "file_id": file_id,
+            "file_type": "photo",
+            "file_name": f"photo_{len(media_files)+1}.jpg",
+            "file_size": update.message.photo[-1].file_size
+        })
+        await update.message.reply_text(f"✅ Фото додано ({len(media_files)}/20)")
+    
+    # Handle video
+    elif update.message.video:
+        file_id = update.message.video.file_id
+        media_files.append({
+            "file_id": file_id,
+            "file_type": "video",
+            "file_name": update.message.video.file_name or f"video_{len(media_files)+1}.mp4",
+            "file_size": update.message.video.file_size
+        })
+        await update.message.reply_text(f"✅ Відео додано ({len(media_files)}/20)")
+    
+    # Handle document (like video)
+    elif update.message.document:
+        if update.message.document.mime_type and update.message.document.mime_type.startswith("video"):
+            file_id = update.message.document.file_id
+            media_files.append({
+                "file_id": file_id,
+                "file_type": "video",
+                "file_name": update.message.document.file_name or f"video_{len(media_files)+1}.mp4",
+                "file_size": update.message.document.file_size
+            })
+            await update.message.reply_text(f"✅ Відео додано ({len(media_files)}/20)")
+        else:
+            await update.message.reply_text("❌ Підтримуються лише фото та відео.")
+    
+    else:
+        await update.message.reply_text("❌ Будь ласка, надішліть фото або відео.")
+    
+    context.user_data["task_data"]["media_files"] = media_files
+    return TASK_STEP_MEDIA
+
+
+async def task_done_media(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Finish media upload and proceed to user selection."""
+    if "task_data" not in context.user_data:
+        await update.message.reply_text("❌ Немає активного завдання.")
+        return ConversationHandler.END
+    
+    await update.message.reply_text("✅ Завантаження медіа завершено. Переходимо до вибору виконавців...")
+    
+    context.user_data["task_data"]["waiting_for_media"] = False
+    
+    # Get creator ID and determine their permissions
+    creator_id = context.user_data["task_data"].get("admin_id")
+    creator_is_super = is_super_admin(creator_id)
+    creator_is_admin = is_group_admin(creator_id)
+    
+    # Get available users based on creator's role
+    if creator_is_super:
+        all_users = get_all_users()
+    elif creator_is_admin:
+        admin_groups = get_admin_groups(creator_id)
+        admin_group_ids = [g['group_id'] for g in admin_groups]
+        all_users = get_users_for_task_assignment(creator_id, False, True, admin_group_ids)
+    else:
+        all_users = get_users_for_task_assignment(creator_id, False, False)
+    
+    if not all_users:
+        keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="start_menu")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await update.message.reply_text("❌ Немає доступних працівників для призначення.", reply_markup=reply_markup)
+        context.user_data.clear()
+        return ConversationHandler.END
+    
+    # Build keyboard with users grouped by department
+    keyboard = []
+    groups = get_all_groups()
+    grouped_users = {}
+    users_without_group = []
+    
+    for user in all_users:
+        group_id = user.get('group_id')
+        if group_id:
+            if group_id not in grouped_users:
+                grouped_users[group_id] = []
+            grouped_users[group_id].append(user)
+        else:
+            users_without_group.append(user)
+    
+    # Add users grouped by department
+    for group in groups:
+        if group['group_id'] in grouped_users:
+            keyboard.append([InlineKeyboardButton(f"📌 {group['name']}", callback_data="ignore")])
+            for user in grouped_users[group['group_id']]:
+                keyboard.append([
+                    InlineKeyboardButton(
+                        f"☐ {user.get('name') or user.get('username','unknown')}",
+                        callback_data=f"task_toggle_user_{user['user_id']}"
+                    )
+                ])
+    
+    # Add users without group
+    if users_without_group:
+        #keyboard.append([InlineKeyboardButton(f"📌 Без відділу", callback_data="ignore")])
+        for user in users_without_group:
+            keyboard.append([
+                InlineKeyboardButton(
+                    f"☐ {user.get('name') or user.get('username','unknown')}",
+                    callback_data=f"task_toggle_user_{user['user_id']}"
+                )
+            ])
+    keyboard.append([InlineKeyboardButton("✅ Підтвердити виконавців", callback_data="task_confirm_users")])
+    keyboard.append([InlineKeyboardButton("⬅️ Скасувати", callback_data="cancel_task_creation")])
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text(
+        "👷 Виберіть виконавців для призначення:\n(Натисніть, щоб переключити)",
+        reply_markup=reply_markup
+    )
+    
+    return TASK_STEP_USERS
+
+
+async def task_skip_media(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Skip media and proceed to user selection."""
+    query = update.callback_query
+    await query.answer()
+    
+    context.user_data["task_data"]["waiting_for_media"] = False
+    
+    # Show user selection
+    await select_users_for_task(query, context)
+    return TASK_STEP_USERS
+
+
+async def select_users_for_task(query, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show user selection for task assignment - filtered by role permissions."""
+    # Get creator ID and determine their permissions
+    creator_id = context.user_data["task_data"].get("admin_id")
+    creator_is_super = is_super_admin(creator_id)
+    creator_is_admin = is_group_admin(creator_id)
+    
+    # Get available users based on creator's role
+    if creator_is_super:
+        all_users = get_all_users()
+    elif creator_is_admin:
+        # Admin can assign to users in their managed groups
+        from database import get_admin_groups
+        admin_groups = get_admin_groups(creator_id)
+        admin_group_ids = [g['group_id'] for g in admin_groups]
+        all_users = get_users_for_task_assignment(creator_id, False, True, admin_group_ids)
+    else:
+        # Regular worker: can assign to users in same groups + admins of those groups
+        all_users = get_users_for_task_assignment(creator_id, False, False)
+    
+    if not all_users:
+        await query.edit_message_text("❌ Немає доступних працівників для призначення.")
+        return
+    
+    # Get currently selected users
+    selected = context.user_data["task_data"].get("assigned_users", [])
+    
+    keyboard = []
+    
+    # Group users by their group
+    groups = get_all_groups()
+    grouped_users = {}
+    users_without_group = []
+    
+    for user in all_users:
+        group_id = user.get('group_id')
+        if group_id:
+            if group_id not in grouped_users:
+                grouped_users[group_id] = []
+            grouped_users[group_id].append(user)
+        else:
+            users_without_group.append(user)
+    
+    # Add users grouped by department
+    for group in groups:
+        if group['group_id'] in grouped_users:
+            # Add group header (disabled button)
+            keyboard.append([InlineKeyboardButton(f"📌 {group['name']}", callback_data="ignore")])
+            
+            # Add users from this group
+            for user in grouped_users[group['group_id']]:
+                checkbox = "☑" if user['user_id'] in selected else "☐"
+                keyboard.append([
+                    InlineKeyboardButton(
+                        f"{checkbox} {user.get('name')}",
+                        callback_data=f"task_toggle_user_{user['user_id']}"
+                    )
+                ])
+    
+    # Add users without group
+    if users_without_group:
+        #keyboard.append([InlineKeyboardButton(f"📌 Без відділу", callback_data="ignore")])
+        for user in users_without_group:
+            checkbox = "☑" if user['user_id'] in selected else "☐"
+            keyboard.append([
+                InlineKeyboardButton(
+                    f"{checkbox} {user.get('name')}",
+                    callback_data=f"task_toggle_user_{user['user_id']}"
+                )
+            ])
+    
+    keyboard.append([InlineKeyboardButton("✅ Підтвердити виконавців", callback_data="task_confirm_users")])
+    keyboard.append([InlineKeyboardButton("⬅️ Скасувати", callback_data="cancel_task_creation")])
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    # Show count of selected users
+    selected_count = len(selected)
+    message_text = f"👷 Виберіть виконавців для призначення:\n(Натисніть, щоб переключити)\n\n✅ Вибрано: {selected_count}"
+    
+    try:
+        await query.edit_message_text(
+            message_text,
+            reply_markup=reply_markup
+        )
+    except Exception as e:
+        # If message is not modified (same content), just ignore the error
+        if "Message is not modified" not in str(e):
+            logger.error(f"Error updating user selection: {e}")
+            raise
+
+
+async def task_toggle_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Toggle user selection."""
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = int(query.data.split("_")[-1])
+    selected = context.user_data["task_data"].get("assigned_users", [])
+    
+    if user_id in selected:
+        selected.remove(user_id)
+    else:
+        selected.append(user_id)
+    
+    context.user_data["task_data"]["assigned_users"] = selected
+    
+    # Re-render user selection
+    await select_users_for_task(query, context)
+    return TASK_STEP_USERS
+
+
+async def task_confirm_users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Confirm user selection and create task."""
+    query = update.callback_query
+    await query.answer()
+    
+    task_data = context.user_data["task_data"]
+    assigned_users = task_data.get("assigned_users", [])
+    
+    # Determine group_id for the task
+    # If creator has a group, use it; otherwise use the first assigned user's group
+    group_id = task_data.get("group_id")
+    if not group_id and assigned_users:
+        # Get group from first assigned user
+        first_user = get_user_by_id(assigned_users[0])
+        if first_user and first_user.get('group_id'):
+            group_id = first_user['group_id']
+    
+    # If still no group, use first available group
+    if not group_id:
+        groups = get_all_groups()
+        if groups:
+            group_id = groups[0]['group_id']
+    
+    # Create task using database function (avoid name collision with bot.create_task)
+    from database import create_task as db_create_task
+    task_id = db_create_task(
+        date=task_data["date"],
+        time=task_data["time"],
+        description=task_data["description"],
+        group_id=group_id,
+        admin_id=task_data["admin_id"],
+        assigned_to_list=assigned_users
+    )
+    
+    keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="start_menu")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    if task_id:
+        # Add media if any
+        for media_file in task_data.get("media_files", []):
+            add_task_media(
+                task_id,
+                media_file["file_id"],
+                media_file["file_type"],
+                media_file.get("file_name"),
+                media_file.get("file_size")
+            )
+        
+        # Send notifications to assigned users
+        task_desc = task_data["description"].split('\n')[0]  # Get first line (task name)
+        for user_id in assigned_users:
+            await send_task_assignment_notification(
+                context,
+                user_id,
+                task_id,
+                task_desc,
+                task_data["date"],
+                task_data["time"]
+            )
+        
+        await query.edit_message_text(
+            f"✅ Завдання успішно створено!\nID завдання: {task_id}\n"
+            f"призначено виконавців: {len(assigned_users)}\n\n"
+            f"📧 Надіслано {len(assigned_users)} сповіщень",
+            reply_markup=reply_markup
+        )
+    else:
+        await query.edit_message_text(
+            "❌ Не вдалося створити завдання.",
+            reply_markup=reply_markup
+        )
+    
+    context.user_data.clear()
+    return ConversationHandler.END
+
+
+async def task_skip_description(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Skip description and proceed to media step."""
+    query = update.callback_query
+    await query.answer()
+    
+    context.user_data["task_data"]["current_step"] = 5
+    context.user_data["task_data"]["description_skipped"] = True
+    context.user_data["task_data"]["media_visited"] = True
+    
+    keyboard = [
+        [InlineKeyboardButton("📸 Додати фото/відео", callback_data="task_add_media")],
+        [InlineKeyboardButton("⏭️ Пропустити медіа", callback_data="task_skip_media")],
+        [InlineKeyboardButton("⬅️ Назад", callback_data="task_back_to_description"),
+         InlineKeyboardButton("❌ Скасувати", callback_data="cancel_task_creation")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await query.edit_message_text(
+        "🖼️ Крок 5/5: Додайте медіа (фото/відео) або пропустіть:",
+        reply_markup=reply_markup
+    )
+    return TASK_STEP_MEDIA
+
+
+# Forward navigation handlers
+async def task_forward_to_date(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Navigate forward to date selection step."""
+    query = update.callback_query
+    await query.answer()
+    
+    context.user_data["task_data"]["current_step"] = 2
+    
+    # Show calendar
+    now = datetime.now()
+    calendar_keyboard = generate_calendar(now.year, now.month)
+    
+    # Add navigation buttons
+    nav_buttons = [InlineKeyboardButton("⬅️ Назад", callback_data="task_back_to_title")]
+    
+    # Show Forward button if user already filled time
+    if "time" in context.user_data["task_data"]:
+        nav_buttons.append(InlineKeyboardButton("➡️ Вперед", callback_data="task_forward_to_time"))
+    
+    nav_buttons.append(InlineKeyboardButton("❌ Скасувати", callback_data="cancel_task_creation"))
+    calendar_keyboard.append(nav_buttons)
+    
+    reply_markup = InlineKeyboardMarkup(calendar_keyboard)
+    
+    await query.edit_message_text(
+        "📆 Крок 2/5: Оберіть дату дедлайну:",
+        reply_markup=reply_markup
+    )
+    return TASK_STEP_DATE
+
+
+async def task_forward_to_time(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Navigate forward to time selection step."""
+    query = update.callback_query
+    await query.answer()
+    
+    context.user_data["task_data"]["current_step"] = 3
+    
+    # Show time picker
+    keyboard = []
+    for i in range(0, len(TIME_OPTIONS), 4):
+        row = []
+        for time_opt in TIME_OPTIONS[i:i+4]:
+            row.append(InlineKeyboardButton(time_opt, callback_data=f"time_select_{time_opt}"))
+        keyboard.append(row)
+    
+    # Add navigation buttons
+    nav_buttons = [InlineKeyboardButton("⬅️ Назад", callback_data="task_back_to_date")]
+    
+    # Show Forward button if description step was already visited
+    task_data = context.user_data["task_data"]
+    if "description" in task_data and ("\n\n" in task_data["description"] or task_data.get("description_skipped")):
+        nav_buttons.append(InlineKeyboardButton("➡️ Вперед", callback_data="task_forward_to_description"))
+    
+    nav_buttons.append(InlineKeyboardButton("❌ Скасувати", callback_data="cancel_task_creation"))
+    keyboard.append(nav_buttons)
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    # Get current selected date info
+    selected_date = context.user_data["task_data"].get("date", "")
+    date_display = ""
+    if selected_date:
+        year, month, day = selected_date.split("-")
+        date_display = f"📅 Обрано: {day} {UKR_MONTHS[int(month)-1]} {year}\n\n"
+    
+    await query.edit_message_text(
+        f"{date_display}🕒 Крок 3/5: Оберіть час дедлайну\n\n"
+        f"Або вкажіть час вручну у форматі 00:00",
+        reply_markup=reply_markup
+    )
+    return TASK_STEP_TIME
+
+
+async def task_forward_to_description(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Navigate forward to description input step."""
+    query = update.callback_query
+    await query.answer()
+    
+    context.user_data["task_data"]["current_step"] = 4
+    
+    keyboard = [[InlineKeyboardButton("⏭️ Пропустити опис", callback_data="task_skip_description")]]
+    
+    # Navigation buttons row
+    nav_buttons = [InlineKeyboardButton("⬅️ Назад", callback_data="task_back_to_time")]
+    
+    # Show Forward button if media step was already visited
+    if context.user_data["task_data"].get("media_visited"):
+        nav_buttons.append(InlineKeyboardButton("➡️ Вперед", callback_data="task_forward_to_media"))
+    
+    nav_buttons.append(InlineKeyboardButton("❌ Скасувати", callback_data="cancel_task_creation"))
+    keyboard.append(nav_buttons)
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await query.edit_message_text(
+        f"✅ Дедлайн: {context.user_data['task_data']['date']} о {context.user_data['task_data']['time']}\n\n"
+        f"📝 Крок 4/5: Введіть детальний опис завдання (опціонально):",
+        reply_markup=reply_markup
+    )
+    return TASK_STEP_DESCRIPTION
+
+
+async def task_forward_to_media(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Navigate forward to media input step."""
+    query = update.callback_query
+    await query.answer()
+    
+    context.user_data["task_data"]["current_step"] = 5
+    
+    keyboard = [
+        [InlineKeyboardButton("📸 Додати фото/відео", callback_data="task_add_media")],
+        [InlineKeyboardButton("⏭️ Пропустити медіа", callback_data="task_skip_media")],
+        [InlineKeyboardButton("⬅️ Назад", callback_data="task_back_to_description"),
+         InlineKeyboardButton("❌ Скасувати", callback_data="cancel_task_creation")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await query.edit_message_text(
+        "🖼️ Крок 5/5: Додайте медіа (фото/відео) або пропустіть:",
+        reply_markup=reply_markup
+    )
+    return TASK_STEP_MEDIA
+
+
+async def task_back_to_title(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Navigate back to title input step."""
+    query = update.callback_query
+    await query.answer()
+    
+    context.user_data["task_data"]["current_step"] = 1
+    
+    # Add navigation buttons
+    nav_buttons = []
+    
+    # Show Forward button if user already filled time (went to step 3+)
+    if "time" in context.user_data["task_data"]:
+        nav_buttons.append(InlineKeyboardButton("➡️ Вперед", callback_data="task_forward_to_date"))
+    
+    nav_buttons.append(InlineKeyboardButton("❌ Скасувати", callback_data="cancel_task_creation"))
+    
+    keyboard = [nav_buttons]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    current_title = context.user_data["task_data"].get("description", "")
+    
+    await query.edit_message_text(
+        f"📝 Крок 1/5: Введіть назву завдання:\n\n"
+        f"{'Поточна назва: ' + current_title if current_title else ''}",
+        reply_markup=reply_markup
+    )
+    return TASK_STEP_TITLE
+
+
+async def task_back_to_date(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Navigate back to date selection step."""
+    query = update.callback_query
+    await query.answer()
+    
+    context.user_data["task_data"]["current_step"] = 2
+    
+    # Show calendar
+    now = datetime.now()
+    calendar_keyboard = generate_calendar(now.year, now.month)
+    
+    # Add navigation buttons
+    nav_buttons = [InlineKeyboardButton("⬅️ Назад", callback_data="task_back_to_title")]
+    
+    # Show Forward button if user already filled time
+    if "time" in context.user_data["task_data"]:
+        nav_buttons.append(InlineKeyboardButton("➡️ Вперед", callback_data="task_forward_to_time"))
+    
+    nav_buttons.append(InlineKeyboardButton("❌ Скасувати", callback_data="cancel_task_creation"))
+    calendar_keyboard.append(nav_buttons)
+    
+    reply_markup = InlineKeyboardMarkup(calendar_keyboard)
+    
+    await query.edit_message_text(
+        "📆 Крок 2/5: Оберіть дату дедлайну:",
+        reply_markup=reply_markup
+    )
+    return TASK_STEP_DATE
+
+
+async def task_back_to_time(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Navigate back to time selection step."""
+    query = update.callback_query
+    await query.answer()
+    
+    context.user_data["task_data"]["current_step"] = 3
+    
+    # Show time picker
+    keyboard = []
+    for i in range(0, len(TIME_OPTIONS), 4):
+        row = []
+        for time_opt in TIME_OPTIONS[i:i+4]:
+            row.append(InlineKeyboardButton(time_opt, callback_data=f"time_select_{time_opt}"))
+        keyboard.append(row)
+    
+    # Add navigation buttons
+    nav_buttons = [InlineKeyboardButton("⬅️ Назад", callback_data="task_back_to_date")]
+    
+    # Show Forward button if description step was already visited
+    task_data = context.user_data["task_data"]
+    if "description" in task_data and ("\n\n" in task_data["description"] or task_data.get("description_skipped")):
+        nav_buttons.append(InlineKeyboardButton("➡️ Вперед", callback_data="task_forward_to_description"))
+    
+    nav_buttons.append(InlineKeyboardButton("❌ Скасувати", callback_data="cancel_task_creation"))
+    keyboard.append(nav_buttons)
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    # Get current selected date info
+    selected_date = context.user_data["task_data"].get("date", "")
+    date_display = ""
+    if selected_date:
+        year, month, day = selected_date.split("-")
+        date_display = f"📅 Обрано: {day} {UKR_MONTHS[int(month)-1]} {year}\n\n"
+    
+    await query.edit_message_text(
+        f"{date_display}🕒 Крок 3/5: Оберіть час дедлайну\n\n"
+        f"Або вкажіть час вручну у форматі 00:00",
+        reply_markup=reply_markup
+    )
+    return TASK_STEP_TIME
+
+
+async def task_back_to_description(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Navigate back to description input step."""
+    query = update.callback_query
+    await query.answer()
+    
+    context.user_data["task_data"]["current_step"] = 4
+    
+    keyboard = [[InlineKeyboardButton("⏭️ Пропустити опис", callback_data="task_skip_description")]]
+    
+    # Navigation buttons row
+    nav_buttons = [InlineKeyboardButton("⬅️ Назад", callback_data="task_back_to_time")]
+    
+    # Show Forward button if media step was already visited
+    if context.user_data["task_data"].get("media_visited"):
+        nav_buttons.append(InlineKeyboardButton("➡️ Вперед", callback_data="task_forward_to_media"))
+    
+    nav_buttons.append(InlineKeyboardButton("❌ Скасувати", callback_data="cancel_task_creation"))
+    keyboard.append(nav_buttons)
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await query.edit_message_text(
+        f"✅ Дедлайн: {context.user_data['task_data']['date']} о {context.user_data['task_data']['time']}\n\n"
+        f"📝 Крок 4/5: Введіть детальний опис завдання (опціонально):",
+        reply_markup=reply_markup
+    )
+    return TASK_STEP_DESCRIPTION
+
+
+async def cancel_task_creation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Cancel task creation and return to menu."""
+    query = update.callback_query
+    await query.answer()
+    
+    keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="start_menu")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    context.user_data.clear()
+    await query.edit_message_text("❌ Створення завдання скасовано.", reply_markup=reply_markup)
+    
+

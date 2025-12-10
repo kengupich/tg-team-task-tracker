@@ -1,0 +1,570 @@
+"""Super admin handlers for user management."""
+import logging
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ContextTypes, ConversationHandler
+
+from database import (
+    get_all_users, get_user_by_id, get_users_without_group,
+    get_user_groups, get_all_groups, add_user, ban_user, unban_user, delete_user,
+    add_user_to_group, remove_user_from_group, set_user_name
+)
+
+logger = logging.getLogger(__name__)
+
+# Conversation states for user management
+USER_NAME_INPUT = 110
+WAITING_GROUP_SELECT = 111
+USER_ID_INPUT = 112
+USER_CONFIRM = 113
+
+
+__all__ = [
+    'super_manage_users',
+    '_render_all_employees_page',
+    'super_all_employees_page',
+    'super_list_group_users',
+    'super_list_no_group_users',
+    'super_user_action_menu',
+    'super_user_set_name_start',
+    'super_user_set_name_input',
+    'super_user_edit_groups',
+    '_render_user_groups_checklist',
+    'super_user_toggle_group',
+    'super_user_groups_confirm',
+    'super_user_groups_cancel',
+    'super_user_ban',
+    'super_user_unban',
+    'super_user_delete',
+    'super_user_delete_confirm',
+    'super_add_user',
+    'super_user_select_group',
+    'super_user_id_input',
+    'super_user_name_input',
+    'super_confirm_user',
+    'super_cancel_user',
+    'USER_NAME_INPUT',
+    'WAITING_GROUP_SELECT',
+    'USER_ID_INPUT',
+    'USER_CONFIRM',
+]
+
+
+async def super_manage_users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show departments (groups) with counts and users without group."""
+    query = update.callback_query
+    await query.answer()
+    # Show paginated list of all employees (name, department or 'вільний').
+    # This replaces the previous groups/counts view and provides immediate access
+    # to every employee from the "Працівники" menu.
+    await _render_all_employees_page(query, context, page=0)
+
+
+async def _render_all_employees_page(query, context, page=0, page_size=10):
+    """Render a paginated list of all employees (name, department or 'вільний')."""
+    await query.answer()
+    all_users = get_all_users() or []
+    total = len(all_users)
+    max_page = max(0, (total - 1) // page_size)
+    page = max(0, min(page, max_page))
+
+    start = page * page_size
+    end = start + page_size
+    page_users = all_users[start:end]
+
+    text_lines = [f"Працівники ({total}) — сторінка {page+1}/{max_page+1}:\n"]
+    keyboard = []
+
+    for u in page_users:
+        uid = u['user_id']
+        name = u.get('name') or u.get('username', 'Невідомо')
+        # Get all groups this user belongs to
+        user_groups = get_user_groups(uid)
+        if user_groups:
+            group_label = ', '.join([g['name'] for g in user_groups])
+        else:
+            group_label = 'вільний'
+        
+        # Add banned indicator
+        banned_emoji = '⛔ ' if u.get('banned') else ''
+
+        text_lines.append(f"• {banned_emoji}{name}, {group_label}")
+        keyboard.append([InlineKeyboardButton(f"{banned_emoji}{name}, {group_label}", callback_data=f"super_user_{uid}")])
+
+    # Navigation
+    nav = []
+    if page > 0:
+        nav.append(InlineKeyboardButton("⬅️ Попередня", callback_data=f"super_all_employees_page_{page-1}"))
+    if page < max_page:
+        nav.append(InlineKeyboardButton("Наступна ➡️", callback_data=f"super_all_employees_page_{page+1}"))
+    if nav:
+        keyboard.append(nav)
+
+    # Back to main
+    keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="start_menu")])
+
+    await query.edit_message_text("\n".join(text_lines), reply_markup=InlineKeyboardMarkup(keyboard))
+
+
+async def super_all_employees_page(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle pagination callbacks for all-employees view."""
+    query = update.callback_query
+    await query.answer()
+    parts = query.data.split("_")
+    try:
+        page = int(parts[-1])
+    except Exception:
+        await query.edit_message_text("❌ Неправильна сторінка")
+        return
+
+    await _render_all_employees_page(query, context, page=page)
+    return
+
+
+async def super_list_group_users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+    group_id = int(data.split("_")[-1])
+    users = get_group_users(group_id)
+    if not users:
+        keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="super_manage_users")]]
+        await query.edit_message_text("Немає працівників у цьому відділі.", reply_markup=InlineKeyboardMarkup(keyboard))
+        return
+
+    keyboard = []
+    text = f"Працівники у відділі:\n\n"
+    for u in users:
+        keyboard.append([InlineKeyboardButton(f"{u['name']}", callback_data=f"super_user_{u['user_id']}")])
+        text += f"• {u['name']} (ID: {u['user_id']})\n"
+
+    # Add Edit list button
+    keyboard.append([InlineKeyboardButton("✏️ Редагувати список", callback_data="super_edit_group_members")])
+    keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="super_manage_users")])
+    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+
+
+async def super_list_no_group_users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    users = get_users_without_group() #get_users_without_group()
+    if not users:
+        keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="super_manage_users")]]
+        await query.edit_message_text("Немає працівників без відділу.", reply_markup=InlineKeyboardMarkup(keyboard))
+        return
+
+    keyboard = []
+    text = "Працівники без відділу:\n\n"
+    for u in users:
+        keyboard.append([InlineKeyboardButton(f"{u['name']}", callback_data=f"super_user_{u['user_id']}")])
+        text += f"• {u['name']} (ID: {u['user_id']})\n"
+
+    keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="super_manage_users")])
+    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+
+
+async def super_user_action_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+    user_id = int(data.split("_")[-1])
+    user = get_user_by_id(user_id)
+    if not user:
+        await query.edit_message_text("Працівника не знайдено.")
+        return
+
+    # Get all groups this user belongs to
+    user_groups = get_user_groups(user_id)
+    if user_groups:
+        groups_text = ', '.join([g['name'] for g in user_groups])
+    else:
+        groups_text = 'немає'
+    
+    # Check if user is banned
+    is_banned = user.get('banned', 0) == 1
+    ban_status = '⛔ Заблокований' if is_banned else '✅ Активний'
+
+    keyboard = [
+        [InlineKeyboardButton("✏️ Встановити ім'я", callback_data=f"super_user_set_name_{user_id}")],
+        [InlineKeyboardButton("📂 Редагувати відділи", callback_data=f"super_user_edit_groups_{user_id}")],
+    ]
+    
+    # Show unban or ban button based on status
+    if is_banned:
+        keyboard.append([InlineKeyboardButton("✅ Розблокувати", callback_data=f"super_user_unban_{user_id}")])
+    else:
+        keyboard.append([InlineKeyboardButton("⛔ Заблокувати", callback_data=f"super_user_ban_{user_id}")])
+    
+    keyboard.append([InlineKeyboardButton("🗑️ Видалити", callback_data=f"super_user_delete_{user_id}")])
+    keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="super_manage_users")])
+    
+    message_text = f"Працівник: {user['name']} (ID: {user['user_id']})\nСтатус: {ban_status}\n\nВідділи: {groups_text}"
+    await query.edit_message_text(message_text, reply_markup=InlineKeyboardMarkup(keyboard))
+
+
+async def super_user_set_name_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    user_id = int(query.data.split("_")[-1])
+    context.user_data['manage_user_id'] = user_id
+    await query.edit_message_text("Введіть нове ім'я для працівника:")
+    return user_NAME_INPUT
+
+
+async def super_user_set_name_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    user_id = context.user_data.get('manage_user_id')
+    if not user_id:
+        await update.message.reply_text("Працівника не знайдено в контексті.")
+        return ConversationHandler.END
+    new_name = update.message.text.strip()
+    if set_user_name(user_id, new_name):
+        keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="super_manage_users")]]
+        await update.message.reply_text("Ім'я оновлено.", reply_markup=InlineKeyboardMarkup(keyboard))
+    else:
+        await update.message.reply_text("Не вдалося оновити ім'я.")
+    context.user_data.pop('manage_user_id', None)
+    return ConversationHandler.END
+
+
+async def super_user_edit_groups(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Show checklist of all groups to edit user's group memberships."""
+    query = update.callback_query
+    await query.answer()
+    user_id = int(query.data.split("_")[-1])
+    
+    # Store user_id in context
+    context.user_data['edit_user_groups_id'] = user_id
+    
+    # Get all groups and user's current groups
+    all_groups = get_all_groups()
+    user_groups = get_user_groups(user_id)
+    user_group_ids = {g['group_id'] for g in user_groups}
+    
+    # Store original selection for rollback
+    context.user_data['edit_user_groups_original'] = user_group_ids.copy()
+    context.user_data['edit_user_groups_selection'] = user_group_ids.copy()
+    
+    # Render checklist
+    await _render_user_groups_checklist(query, context, user_id, all_groups)
+    return ConversationHandler.END
+
+
+async def _render_user_groups_checklist(query, context, user_id, all_groups=None):
+    """Render checklist of groups for a specific user."""
+    if all_groups is None:
+        all_groups = get_all_groups()
+    
+    selection = context.user_data.get('edit_user_groups_selection', set())
+    user = get_user_by_id(user_id)
+    user_name = user['name'] if user else 'Невідомо'
+    
+    keyboard = []
+    text = f"Редагування відділів для {user_name}:\n\nОберіть відділи, до яких належить цей працівник:"
+    
+    for group in all_groups:
+        gid = group['group_id']
+        checked = '☑' if gid in selection else '☐'
+        keyboard.append([InlineKeyboardButton(
+            f"{checked} {group['name']}",
+            callback_data=f"super_user_toggle_group_{user_id}_{gid}"
+        )])
+    
+    # Confirm / Cancel buttons
+    keyboard.append([InlineKeyboardButton("✅ Підтвердити", callback_data=f"super_user_groups_confirm_{user_id}")])
+    keyboard.append([InlineKeyboardButton("❌ Скасувати", callback_data=f"super_user_groups_cancel_{user_id}")])
+    
+    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+
+
+async def super_user_toggle_group(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Toggle a group selection for a user."""
+    query = update.callback_query
+    await query.answer()
+    
+    parts = query.data.split("_")
+    user_id = int(parts[-2])
+    group_id = int(parts[-1])
+    
+    selection = context.user_data.get('edit_user_groups_selection', set())
+    if not isinstance(selection, set):
+        selection = set(selection)
+    
+    # Toggle
+    if group_id in selection:
+        selection.remove(group_id)
+    else:
+        selection.add(group_id)
+    
+    context.user_data['edit_user_groups_selection'] = selection
+    
+    # Re-render
+    await _render_user_groups_checklist(query, context, user_id)
+
+
+async def super_user_groups_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Apply the group membership changes for a user."""
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = int(query.data.split("_")[-1])
+    original = context.user_data.get('edit_user_groups_original', set())
+    selection = context.user_data.get('edit_user_groups_selection', set())
+    
+    # Determine what to add and remove
+    to_add = selection - original
+    to_remove = original - selection
+    
+    # Apply changes
+    for gid in to_add:
+        add_user_to_group(user_id, gid)
+    
+    for gid in to_remove:
+        remove_user_from_group(user_id, gid)
+    
+    # Clear context
+    context.user_data.pop('edit_user_groups_id', None)
+    context.user_data.pop('edit_user_groups_original', None)
+    context.user_data.pop('edit_user_groups_selection', None)
+    
+    keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="super_manage_users")]]
+    await query.edit_message_text(
+        f"✅ Відділи оновлено (додано: {len(to_add)}, видалено: {len(to_remove)})",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+
+async def super_user_groups_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Cancel group editing for a user."""
+    query = update.callback_query
+    await query.answer()
+    
+    # Clear context
+    context.user_data.pop('edit_user_groups_id', None)
+    context.user_data.pop('edit_user_groups_original', None)
+    context.user_data.pop('edit_user_groups_selection', None)
+    
+    keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="super_manage_users")]]
+    await query.edit_message_text("❌ Зміни скасовано.", reply_markup=InlineKeyboardMarkup(keyboard))
+
+
+async def super_user_ban(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Ban a user - remove from all groups and cancel their tasks."""
+    query = update.callback_query
+    await query.answer()
+    user_id = int(query.data.split("_")[-1])
+    
+    user = get_user_by_id(user_id)
+    if not user:
+        await query.edit_message_text("Працівника не знайдено.")
+        return
+    
+    # Ban user
+    if ban_user(user_id):
+        # Remove from all groups
+        remove_user_from_all_groups(user_id)
+        # Cancel/update tasks
+        result = cancel_user_tasks(user_id)
+        
+        message = f"⛔ Працівника {user['name']} заблоковано.\n\n"
+        message += f"Скасовано завдань: {result['cancelled']}\n"
+        message += f"Оновлено завдань: {result['updated']}"
+        
+        keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="super_manage_users")]]
+        await query.edit_message_text(message, reply_markup=InlineKeyboardMarkup(keyboard))
+    else:
+        await query.edit_message_text("Не вдалося заблокувати працівника.")
+
+
+async def super_user_unban(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Unban a user."""
+    query = update.callback_query
+    await query.answer()
+    user_id = int(query.data.split("_")[-1])
+    
+    user = get_user_by_id(user_id)
+    if not user:
+        await query.edit_message_text("Працівника не знайдено.")
+        return
+    
+    if unban_user(user_id):
+        message = f"✅ Працівника {user['name']} розблоковано."
+        keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="super_manage_users")]]
+        await query.edit_message_text(message, reply_markup=InlineKeyboardMarkup(keyboard))
+    else:
+        await query.edit_message_text("Не вдалося розблокувати працівника.")
+
+
+async def super_user_delete(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Delete a user - ban them, remove from groups, and cancel tasks."""
+    query = update.callback_query
+    await query.answer()
+    user_id = int(query.data.split("_")[-1])
+    
+    user = get_user_by_id(user_id)
+    if not user:
+        await query.edit_message_text("Працівника не знайдено.")
+        return
+    
+    # Show confirmation
+    keyboard = [
+        [InlineKeyboardButton("✅ Так, видалити", callback_data=f"super_user_delete_confirm_{user_id}")],
+        [InlineKeyboardButton("❌ Скасувати", callback_data=f"super_user_{user_id}")],
+    ]
+    message = f"⚠️ Ви впевнені, що хочете видалити працівника {user['name']}?\n\nЦе заблокує його та скасує всі його завдання."
+    await query.edit_message_text(message, reply_markup=InlineKeyboardMarkup(keyboard))
+
+
+async def super_user_delete_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Confirm and execute user deletion."""
+    query = update.callback_query
+    await query.answer()
+    user_id = int(query.data.split("_")[-1])
+    
+    user = get_user_by_id(user_id)
+    if not user:
+        await query.edit_message_text("Працівника не знайдено.")
+        return
+    
+    # Cancel/update tasks first
+    result = cancel_user_tasks(user_id)
+    
+    # Delete user (bans and removes from groups)
+    if delete_user(user_id):
+        message = f"🗑️ Працівника {user['name']} видалено.\n\n"
+        message += f"Скасовано завдань: {result['cancelled']}\n"
+        message += f"Оновлено завдань: {result['updated']}"
+        
+        keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="super_manage_users")]]
+        await query.edit_message_text(message, reply_markup=InlineKeyboardMarkup(keyboard))
+    else:
+        await query.edit_message_text("Не вдалося видалити працівника.")
+
+
+
+
+async def super_add_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Super admin start adding user - show groups to select."""
+    query = update.callback_query
+    await query.answer()
+    
+    groups = get_all_groups()
+    if not groups:
+        keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="super_manage_users")]]
+        await query.edit_message_text(
+            "Немає доступних відділів.",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+        return ConversationHandler.END
+    
+    keyboard = []
+    for group in groups:
+        keyboard.append([
+            InlineKeyboardButton(
+                f"📌 {group['name']}",
+                callback_data=f"super_user_select_group_{group['group_id']}"
+            )
+        ])
+    keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="super_manage_users")])
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await query.edit_message_text(
+        "Виберіть відділ для нового працівника:",
+        reply_markup=reply_markup
+    )
+    return WAITING_GROUP_SELECT
+
+
+async def super_user_select_group(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Super admin selected group, now ask for user ID."""
+    query = update.callback_query
+    await query.answer()
+    
+    group_id = int(query.data.split("_")[-1])
+    context.user_data["user_group_id"] = group_id
+    
+    await query.edit_message_text(
+        "📝 Введіть Telegram ID користувача:"
+    )
+    return user_ID_INPUT
+
+
+async def super_user_id_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Super admin entered user ID, now ask for username."""
+    try:
+        user_id = int(update.message.text)
+        context.user_data["user_id"] = user_id
+        await update.message.reply_text(
+            "👤 Введіть ім'я користувача:"
+        )
+        return user_NAME_INPUT
+    except ValueError:
+        await update.message.reply_text(
+            "⚠️ Невірний ID. Будь ласка, введіть дійсний номер:"
+        )
+        return user_ID_INPUT
+
+
+async def super_user_name_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Super admin entered username, confirm."""
+    context.user_data["user_name"] = update.message.text
+    
+    user_id = context.user_data["user_id"]
+    user_name = context.user_data["user_name"]
+    
+    keyboard = [
+        [InlineKeyboardButton("✅ Підтвердити", callback_data="super_confirm_user")],
+        [InlineKeyboardButton("⬅️ Скасувати", callback_data="super_cancel_user")],
+    ]
+    
+    await update.message.reply_text(
+        f"Підтвердіть дані Працівника:\n"
+        f"ID: {user_id}\n"
+        f"Ім'я: {user_name}",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+    return user_CONFIRM
+
+
+async def super_confirm_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Super admin confirmed user, add to database."""
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = context.user_data["user_id"]
+    user_name = context.user_data["user_name"]
+    group_id = context.user_data["user_group_id"]
+    
+    keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="start_menu")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    if add_user_to_group(user_id, user_name, group_id):
+        await query.edit_message_text(
+            f"✅ Працівника успішно додано!",
+            reply_markup=reply_markup
+        )
+    else:
+        await query.edit_message_text(
+            "❌ Не вдалося додати працівника (можливо, він вже існує).",
+            reply_markup=reply_markup
+        )
+    
+    context.user_data.clear()
+    return ConversationHandler.END
+
+
+async def super_cancel_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Super admin cancelled user creation."""
+    query = update.callback_query
+    await query.answer()
+    
+    context.user_data.clear()
+    keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="start_menu")]]
+    await query.edit_message_text(
+        "❌ Створення працівника скасовано.",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+    
+    return ConversationHandler.END
+
+
+# ============================================================================
+
