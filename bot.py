@@ -154,8 +154,8 @@ SUPER_ADMIN_IDS = [
 # Note: SUPER_* states are imported from handlers.super_admin
 (
     EDIT_TASK_SELECT, EDIT_TASK_FIELD,
-    SUPER_MANAGE_USERS_STATE, SUPER_MANAGE_TASKS_STATE,
-) = range(5)
+    SUPER_MANAGE_USERS_STATE, SUPER_MANAGE_TASKS_STATE
+) = range(4)
 
 # Initialize database
 init_db()
