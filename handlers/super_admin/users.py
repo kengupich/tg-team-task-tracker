@@ -102,8 +102,9 @@ async def _render_all_employees_page(query, context, page=0, page_size=10):
 
     # Back to main
     requests = get_pending_registration_requests()
-    requests_text = f"🔔 Запросы на регистрацию ({len(requests)}):\n\n"
-    keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="start_menu")], [InlineKeyboardButton(requests_text, callback_data="super_view_registration_requests")])
+    requests_text = f"🔔 Запросы на регистрацию ({len(requests)})"
+    keyboard.append([InlineKeyboardButton(requests_text, callback_data="super_view_registration_requests")])
+    keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="start_menu")])
 
     await query.edit_message_text("\n".join(text_lines), reply_markup=InlineKeyboardMarkup(keyboard))
 

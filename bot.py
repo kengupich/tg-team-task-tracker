@@ -61,14 +61,16 @@ from handlers.tasks import (
     view_tasks_menu, filter_tasks_created, filter_tasks_assigned,
     filter_tasks_select_group, filter_tasks_group, filter_group_all_tasks,
     filter_tasks_by_assignee, filter_tasks_all,
+    filter_tasks_archived, filter_archived_created, filter_archived_assigned,
     # Creation + states
     create_task, task_title_input, task_calendar_navigation, task_date_selected,
     task_time_selected, task_time_manual_input, task_description_input,
     task_add_media, task_handle_media_file, task_done_media, task_skip_media,
     task_toggle_user, task_confirm_users,
     task_skip_description, task_forward_to_date, task_forward_to_time,
-    task_forward_to_description, task_forward_to_media,
+    task_forward_to_description, task_forward_to_media, task_forward_to_users,
     task_back_to_title, task_back_to_date, task_back_to_time, task_back_to_description,
+    task_back_to_media,
     cancel_task_creation,
     TASK_STEP_TITLE, TASK_STEP_DATE, TASK_STEP_TIME, TASK_STEP_DESCRIPTION,
     TASK_STEP_MEDIA, TASK_STEP_USERS,
@@ -231,6 +233,12 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             await filter_tasks_by_assignee(update, context)
         elif data == "filter_tasks_all":
             await filter_tasks_all(update, context)
+        elif data == "filter_tasks_archived":
+            await filter_tasks_archived(update, context)
+        elif data.startswith("filter_archived_created_"):
+            await filter_archived_created(update, context)
+        elif data.startswith("filter_archived_assigned_"):
+            await filter_archived_assigned(update, context)
 
         # Note: task_add_media, task_skip_media, task_toggle_user, task_confirm_users,
         # and cancel_task_creation are handled by ConversationHandler for task creation.
@@ -290,13 +298,13 @@ def start_bot():
         states={
             TASK_STEP_TITLE: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, task_title_input),
-                CallbackQueryHandler(task_forward_to_date, pattern="^task_forward_to_date$"),
+                CallbackQueryHandler(task_forward_to_description, pattern="^task_forward_to_description$"),
                 CallbackQueryHandler(cancel_task_creation, pattern="^cancel_task_creation$"),
             ],
             TASK_STEP_DATE: [
                 CallbackQueryHandler(task_calendar_navigation, pattern="^cal_(prev|next)_.*"),
                 CallbackQueryHandler(task_date_selected, pattern="^cal_select_.*"),
-                CallbackQueryHandler(task_back_to_title, pattern="^task_back_to_title$"),
+                CallbackQueryHandler(task_back_to_media, pattern="^task_back_to_media$"),
                 CallbackQueryHandler(task_forward_to_time, pattern="^task_forward_to_time$"),
                 CallbackQueryHandler(cancel_task_creation, pattern="^cancel_task_creation$"),
                 CallbackQueryHandler(lambda u, c: u.callback_query.answer(), pattern="^cal_ignore$"),
@@ -304,7 +312,7 @@ def start_bot():
             TASK_STEP_TIME: [
                 CallbackQueryHandler(task_time_selected, pattern="^time_select_.*$"),
                 CallbackQueryHandler(task_back_to_date, pattern="^task_back_to_date$"),
-                CallbackQueryHandler(task_forward_to_description, pattern="^task_forward_to_description$"),
+                CallbackQueryHandler(task_forward_to_users, pattern="^task_forward_to_users$"),
                 CallbackQueryHandler(cancel_task_creation, pattern="^cancel_task_creation$"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, task_time_manual_input),
             ],
@@ -312,7 +320,7 @@ def start_bot():
                 MessageHandler(filters.PHOTO, task_description_input),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, task_description_input),
                 CallbackQueryHandler(task_skip_description, pattern="^task_skip_description$"),
-                CallbackQueryHandler(task_back_to_time, pattern="^task_back_to_time$"),
+                CallbackQueryHandler(task_back_to_title, pattern="^task_back_to_title$"),
                 CallbackQueryHandler(task_forward_to_media, pattern="^task_forward_to_media$"),
                 CallbackQueryHandler(cancel_task_creation, pattern="^cancel_task_creation$"),
             ],
@@ -320,6 +328,7 @@ def start_bot():
                 CallbackQueryHandler(task_add_media, pattern="^task_add_media$"),
                 CallbackQueryHandler(task_skip_media, pattern="^task_skip_media$"),
                 CallbackQueryHandler(task_back_to_description, pattern="^task_back_to_description$"),
+                CallbackQueryHandler(task_forward_to_date, pattern="^task_forward_to_date$"),
                 CallbackQueryHandler(cancel_task_creation, pattern="^cancel_task_creation$"),
                 MessageHandler(filters.PHOTO | filters.VIDEO | filters.Document.ALL, task_handle_media_file),
                 CommandHandler("done_media", task_done_media),
@@ -327,6 +336,7 @@ def start_bot():
             TASK_STEP_USERS: [
                 CallbackQueryHandler(task_toggle_user, pattern="^task_toggle_user_.*"),
                 CallbackQueryHandler(task_confirm_users, pattern="^task_confirm_users$"),
+                CallbackQueryHandler(task_back_to_time, pattern="^task_back_to_time$"),
                 CallbackQueryHandler(cancel_task_creation, pattern="^cancel_task_creation$"),
             ],
         },

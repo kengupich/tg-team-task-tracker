@@ -143,6 +143,14 @@ def init_db():
         # Column already exists
         pass
     
+    # Add username column to users table if it doesn't exist (migration)
+    try:
+        cursor.execute("ALTER TABLE users ADD COLUMN username TEXT")
+        conn.commit()
+    except sqlite3.OperationalError:
+        # Column already exists
+        pass
+    
     conn.commit()
     conn.close()
     logger.info("Database initialized")
@@ -215,16 +223,47 @@ def remove_user(user_id):
 def get_all_users():
     """
     Get all registered users (excluding deleted users, including banned status).
+    Includes group admins even if they're not in user_groups.
     
     Returns:
-        list: List of dictionaries containing user information
+        list: List of dictionaries containing user information with group_name and all_groups
     """
     conn = sqlite3.connect(DB_FILE)
+    conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     
     try:
-        cursor.execute("SELECT user_id, name, group_id, banned FROM users WHERE deleted = 0 ORDER BY name")
-        users = [{"user_id": row[0], "name": row[1], "group_id": row[2], "banned": row[3]} for row in cursor.fetchall()]
+        cursor.execute("""
+            SELECT DISTINCT u.user_id, u.name, u.username, u.banned,
+                   GROUP_CONCAT(DISTINCT g.group_id) as group_ids,
+                   GROUP_CONCAT(DISTINCT g.name) as group_names
+            FROM users u
+            LEFT JOIN user_groups ug ON u.user_id = ug.user_id
+            LEFT JOIN groups g ON ug.group_id = g.group_id
+            WHERE u.deleted = 0
+            GROUP BY u.user_id, u.name, u.username, u.banned
+            ORDER BY u.name
+        """)
+        rows = cursor.fetchall()
+        users = []
+        for row in rows:
+            # Parse group_ids and group_names
+            group_ids_str = row["group_ids"] if row["group_ids"] else ""
+            group_names_str = row["group_names"] if row["group_names"] else ""
+            
+            # Get first group (for backwards compatibility)
+            group_id = int(group_ids_str.split(',')[0]) if group_ids_str else None
+            group_name = group_names_str.split(',')[0] if group_names_str else None
+            
+            users.append({
+                "user_id": row["user_id"],
+                "name": row["name"],
+                "username": row["username"],
+                "group_id": group_id,
+                "group_name": group_name,
+                "all_groups": group_names_str,  # All groups comma-separated
+                "banned": row["banned"]
+            })
         conn.close()
         return users
     except Exception as e:
@@ -1151,7 +1190,7 @@ def get_users_for_task_assignment(creator_id, creator_is_super_admin, creator_is
     
     try:
         if creator_is_super_admin:
-            # Super admin can assign to anyone - get ALL groups user belongs to
+            # Super admin can assign to anyone including group admins - get ALL groups user belongs to
             cursor.execute("""
                 SELECT DISTINCT u.user_id, u.name, u.username,
                        GROUP_CONCAT(DISTINCT g.group_id) as group_ids,
@@ -1159,7 +1198,7 @@ def get_users_for_task_assignment(creator_id, creator_is_super_admin, creator_is
                 FROM users u
                 LEFT JOIN user_groups ug ON u.user_id = ug.user_id
                 LEFT JOIN groups g ON ug.group_id = g.group_id
-                WHERE u.banned = 0
+                WHERE u.banned = 0 AND u.deleted = 0
                 GROUP BY u.user_id, u.name, u.username
                 ORDER BY u.name
             """)
@@ -1173,7 +1212,7 @@ def get_users_for_task_assignment(creator_id, creator_is_super_admin, creator_is
                 FROM users u
                 LEFT JOIN user_groups ug ON u.user_id = ug.user_id
                 LEFT JOIN groups g ON ug.group_id = g.group_id
-                WHERE u.banned = 0 AND (
+                WHERE u.banned = 0 AND u.deleted = 0 AND (
                     ug.group_id IN ({group_ids_str})
                     OR u.user_id = ?
                 )
@@ -1182,7 +1221,7 @@ def get_users_for_task_assignment(creator_id, creator_is_super_admin, creator_is
             """
             cursor.execute(query, (creator_id,))
         else:
-            # Regular worker: ONLY users from worker's OWN groups + admins of those groups
+            # Regular worker: users from worker's OWN groups + admins of those groups + ALWAYS include self
             cursor.execute("""
                 SELECT DISTINCT u.user_id, u.name, u.username,
                        GROUP_CONCAT(DISTINCT g.group_id) as group_ids,
@@ -1190,8 +1229,9 @@ def get_users_for_task_assignment(creator_id, creator_is_super_admin, creator_is
                 FROM users u
                 LEFT JOIN user_groups ug ON u.user_id = ug.user_id
                 LEFT JOIN groups g ON ug.group_id = g.group_id
-                WHERE u.banned = 0 AND (
-                    ug.group_id IN (
+                WHERE u.banned = 0 AND u.deleted = 0 AND (
+                    u.user_id = ?
+                    OR ug.group_id IN (
                         SELECT ug2.group_id FROM user_groups ug2 WHERE ug2.user_id = ?
                     )
                     OR u.user_id IN (
@@ -1203,7 +1243,7 @@ def get_users_for_task_assignment(creator_id, creator_is_super_admin, creator_is
                 )
                 GROUP BY u.user_id, u.name, u.username
                 ORDER BY u.name
-            """, (creator_id, creator_id))
+            """, (creator_id, creator_id, creator_id))
         
         rows = cursor.fetchall()
         users = []
@@ -1501,7 +1541,7 @@ def get_group_tasks(group_id):
 
 
 def get_user_tasks(user_id):
-    """Get all tasks assigned to a user (as executor)."""
+    """Get all active tasks assigned to a user (as executor), excluding completed."""
     import json
     
     conn = sqlite3.connect(DB_FILE)
@@ -1512,7 +1552,7 @@ def get_user_tasks(user_id):
         cursor.execute(
             """SELECT task_id, date, time, description, group_id, assigned_to_list, 
                       status, has_media, created_at, created_by
-               FROM tasks WHERE status != 'cancelled' ORDER BY created_at DESC"""
+               FROM tasks WHERE status NOT IN ('cancelled', 'completed') ORDER BY created_at DESC"""
         )
         tasks = []
         for row in cursor.fetchall():
@@ -1529,7 +1569,7 @@ def get_user_tasks(user_id):
 
 
 def get_tasks_created_by_user(user_id):
-    """Get all tasks created by a user (as постановник)."""
+    """Get all active tasks created by a user (as постановник), excluding completed."""
     conn = sqlite3.connect(DB_FILE)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
@@ -1538,7 +1578,7 @@ def get_tasks_created_by_user(user_id):
         cursor.execute(
             """SELECT task_id, date, time, description, group_id, assigned_to_list, 
                       status, has_media, created_at, created_by
-               FROM tasks WHERE created_by = ? AND status != 'cancelled' 
+               FROM tasks WHERE created_by = ? AND status NOT IN ('cancelled', 'completed') 
                ORDER BY created_at DESC""",
             (user_id,)
         )
@@ -1547,6 +1587,57 @@ def get_tasks_created_by_user(user_id):
         return tasks
     except Exception as e:
         logger.error(f"Error getting tasks created by user: {e}")
+        conn.close()
+        return []
+
+
+def get_user_archived_tasks(user_id):
+    """Get all completed tasks assigned to a user (archived)."""
+    import json
+    
+    conn = sqlite3.connect(DB_FILE)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    
+    try:
+        cursor.execute(
+            """SELECT task_id, date, time, description, group_id, assigned_to_list, 
+                      status, has_media, created_at, created_by, updated_at
+               FROM tasks WHERE status = 'completed' ORDER BY updated_at DESC"""
+        )
+        tasks = []
+        for row in cursor.fetchall():
+            task = dict(row)
+            assigned_list = json.loads(task.get('assigned_to_list') or '[]')
+            if user_id in assigned_list:
+                tasks.append(task)
+        conn.close()
+        return tasks
+    except Exception as e:
+        logger.error(f"Error getting user archived tasks: {e}")
+        conn.close()
+        return []
+
+
+def get_archived_tasks_created_by_user(user_id):
+    """Get all completed tasks created by a user (archived)."""
+    conn = sqlite3.connect(DB_FILE)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    
+    try:
+        cursor.execute(
+            """SELECT task_id, date, time, description, group_id, assigned_to_list, 
+                      status, has_media, created_at, created_by, updated_at
+               FROM tasks WHERE created_by = ? AND status = 'completed' 
+               ORDER BY updated_at DESC""",
+            (user_id,)
+        )
+        tasks = [dict(row) for row in cursor.fetchall()]
+        conn.close()
+        return tasks
+    except Exception as e:
+        logger.error(f"Error getting archived tasks created by user: {e}")
         conn.close()
         return []
 

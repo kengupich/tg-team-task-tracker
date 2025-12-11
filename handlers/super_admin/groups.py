@@ -280,7 +280,7 @@ async def super_admin_group_edit(update: Update, context: ContextTypes.DEFAULT_T
         [InlineKeyboardButton("✏️ Изменить Администратора", callback_data="super_change_admin")],
         [InlineKeyboardButton("📝 Изменить Название", callback_data="super_rename_group")],
         [InlineKeyboardButton("🗑️ Удалить Отдел", callback_data="super_delete_group")],
-        [InlineKeyboardButton("⬅️ Назад", callback_data="super_manage_groups")],
+        [InlineKeyboardButton("⬅️ Назад", callback_data=f"super_admin_select_{group['group_id']}")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     

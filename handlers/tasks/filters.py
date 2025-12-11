@@ -24,6 +24,7 @@ async def view_tasks_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     # Common filters for all users
     keyboard.append([InlineKeyboardButton("📤 Поручил", callback_data="filter_tasks_created")])
     keyboard.append([InlineKeyboardButton("📥 Выполняю", callback_data="filter_tasks_assigned")])
+    keyboard.append([InlineKeyboardButton("📦 Архив задач", callback_data="filter_tasks_archived")])
     
     # Admin-specific filters
     if is_group_admin(user_id):
@@ -389,3 +390,147 @@ async def filter_tasks_all(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         message_text,
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
+
+
+async def filter_tasks_archived(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show archived (completed) tasks menu."""
+    query = update.callback_query
+    await query.answer()
+    
+    keyboard = [
+        [InlineKeyboardButton("📤 Поручил (архив)", callback_data="filter_archived_created_0")],
+        [InlineKeyboardButton("📥 Выполнял (архив)", callback_data="filter_archived_assigned_0")],
+        [InlineKeyboardButton("⬅️ Назад", callback_data="view_tasks_menu")]
+    ]
+    
+    await query.edit_message_text(
+        "📦 Архив завершенных задач\n\nВыберите категорию:",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+
+async def filter_archived_created(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show archived tasks created by user with pagination."""
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = query.from_user.id
+    
+    # Extract page number from callback data
+    page = 0
+    if "_" in query.data:
+        try:
+            page = int(query.data.split("_")[-1])
+        except:
+            page = 0
+    
+    from database import get_archived_tasks_created_by_user
+    tasks = get_archived_tasks_created_by_user(user_id)
+    
+    if not tasks:
+        keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="filter_tasks_archived")]]
+        await query.edit_message_text(
+            "📤 Поручил (архив)\n\nНет завершенных задач.",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+        return
+    
+    # Pagination
+    page_size = 10
+    total_pages = (len(tasks) + page_size - 1) // page_size
+    page = max(0, min(page, total_pages - 1))
+    
+    start_idx = page * page_size
+    end_idx = start_idx + page_size
+    page_tasks = tasks[start_idx:end_idx]
+    
+    keyboard = []
+    for task in page_tasks:
+        desc = task['description'][:40] + '...' if len(task['description']) > 40 else task['description']
+        keyboard.append([
+            InlineKeyboardButton(
+                f"✅ {desc} ({task['date']})",
+                callback_data=f"view_task_{task['task_id']}"
+            )
+        ])
+    
+    # Pagination buttons
+    nav_buttons = []
+    if page > 0:
+        nav_buttons.append(InlineKeyboardButton("◀️ Назад", callback_data=f"filter_archived_created_{page-1}"))
+    if page < total_pages - 1:
+        nav_buttons.append(InlineKeyboardButton("Вперед ▶️", callback_data=f"filter_archived_created_{page+1}"))
+    
+    if nav_buttons:
+        keyboard.append(nav_buttons)
+    
+    keyboard.append([InlineKeyboardButton("⬅️ К архиву", callback_data="filter_tasks_archived")])
+    
+    await query.edit_message_text(
+        f"📤 Поручил (архив)\nСтраница {page + 1}/{total_pages}, всего: {len(tasks)}\n\nВыберите задачу:",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+
+async def filter_archived_assigned(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show archived tasks assigned to user with pagination."""
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = query.from_user.id
+    
+    # Extract page number from callback data
+    page = 0
+    if "_" in query.data:
+        try:
+            page = int(query.data.split("_")[-1])
+        except:
+            page = 0
+    
+    from database import get_user_archived_tasks
+    tasks = get_user_archived_tasks(user_id)
+    
+    if not tasks:
+        keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="filter_tasks_archived")]]
+        await query.edit_message_text(
+            "📥 Выполнял (архив)\n\nНет завершенных задач.",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+        return
+    
+    # Pagination
+    page_size = 10
+    total_pages = (len(tasks) + page_size - 1) // page_size
+    page = max(0, min(page, total_pages - 1))
+    
+    start_idx = page * page_size
+    end_idx = start_idx + page_size
+    page_tasks = tasks[start_idx:end_idx]
+    
+    keyboard = []
+    for task in page_tasks:
+        desc = task['description'][:40] + '...' if len(task['description']) > 40 else task['description']
+        keyboard.append([
+            InlineKeyboardButton(
+                f"✅ {desc} ({task['date']})",
+                callback_data=f"view_task_{task['task_id']}"
+            )
+        ])
+    
+    # Pagination buttons
+    nav_buttons = []
+    if page > 0:
+        nav_buttons.append(InlineKeyboardButton("◀️ Назад", callback_data=f"filter_archived_assigned_{page-1}"))
+    if page < total_pages - 1:
+        nav_buttons.append(InlineKeyboardButton("Вперед ▶️", callback_data=f"filter_archived_assigned_{page+1}"))
+    
+    if nav_buttons:
+        keyboard.append(nav_buttons)
+    
+    keyboard.append([InlineKeyboardButton("⬅️ К архиву", callback_data="filter_tasks_archived")])
+    
+    await query.edit_message_text(
+        f"📥 Выполнял (архив)\nСтраница {page + 1}/{total_pages}, всего: {len(tasks)}\n\nВыберите задачу:",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
