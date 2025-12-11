@@ -309,6 +309,7 @@ def start_bot():
                 MessageHandler(filters.TEXT & ~filters.COMMAND, task_time_manual_input),
             ],
             TASK_STEP_DESCRIPTION: [
+                MessageHandler(filters.PHOTO, task_description_input),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, task_description_input),
                 CallbackQueryHandler(task_skip_description, pattern="^task_skip_description$"),
                 CallbackQueryHandler(task_back_to_time, pattern="^task_back_to_time$"),

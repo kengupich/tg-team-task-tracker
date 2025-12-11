@@ -232,8 +232,8 @@ async def task_time_manual_input(update: Update, context: ContextTypes.DEFAULT_T
 
 async def task_description_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Store description (text or text+photo), proceed to media or date."""
-    # Check if message has photo
-    has_photo = update.message.photo is not None
+    # Check if message has photo (and it's not empty)
+    has_photo = update.message.photo is not None and len(update.message.photo) > 0
     
     # Get text (caption if photo, otherwise message text)
     desc_text = ""
