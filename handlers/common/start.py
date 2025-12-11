@@ -2,7 +2,7 @@
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes
 
-from database import user_exists, has_user_group, get_admin_groups
+from database import user_exists, has_user_group, get_admin_groups, get_user_by_id
 from utils.permissions import is_super_admin, is_group_admin
 
 
@@ -20,12 +20,12 @@ async def show_main_menu(user_id: int, user_name: str, update: Update, is_callba
     if is_super_admin(user_id):
         # Super Admin Menu
         keyboard = [
-            [InlineKeyboardButton("📋 Задачі", callback_data="view_tasks_menu")],
-            [InlineKeyboardButton("👥 Відділи", callback_data="super_manage_groups")],
-            [InlineKeyboardButton("👤 Працівники", callback_data="super_manage_users")],
+            [InlineKeyboardButton("📋 Задачи", callback_data="view_tasks_menu")],
+            [InlineKeyboardButton("👥 Отделы", callback_data="super_manage_groups")],
+            [InlineKeyboardButton("👤 Сотрудники", callback_data="super_manage_users")],
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        text = f"🔐 Вітаю, {user_name}!\n\nГоловне меню:"
+        text = f"🔐 Приветствую, {user_name}!\n\nГлавное меню:"
         
         if is_callback:
             await update.callback_query.edit_message_text(text, reply_markup=reply_markup)
@@ -36,14 +36,14 @@ async def show_main_menu(user_id: int, user_name: str, update: Update, is_callba
     elif is_group_admin(user_id):
         # Group Admin Menu
         admin_groups = get_admin_groups(user_id)
-        group_names = ", ".join([g['name'] for g in admin_groups]) if admin_groups else "Немає"
+        group_names = ", ".join([g['name'] for g in admin_groups]) if admin_groups else "Нет"
         
         keyboard = [
-            [InlineKeyboardButton("📋 Задачі", callback_data="view_tasks_menu")],
-            [InlineKeyboardButton("👥 Працівники", callback_data="admin_manage_users")],
+            [InlineKeyboardButton("📋 Задачи", callback_data="view_tasks_menu")],
+            [InlineKeyboardButton("👥 Сотрудники", callback_data="admin_manage_users")],
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        text = f"👋 Вітаю, {user_name}!\nВідділи: {group_names}\n\nГоловне меню:"
+        text = f"👋 Приветствую, {user_name}!\nОтделы: {group_names}\n\nГлавное меню:"
         
         if is_callback:
             await update.callback_query.edit_message_text(text, reply_markup=reply_markup)
@@ -55,9 +55,9 @@ async def show_main_menu(user_id: int, user_name: str, update: Update, is_callba
         # Check if user is registered
         if not user_exists(user_id):
             # Not registered yet - show registration prompt
-            keyboard = [[InlineKeyboardButton("Зареєструватися як користувач", callback_data="start_registration")]]
+            keyboard = [[InlineKeyboardButton("Зарегистрироваться как пользователь", callback_data="start_registration")]]
             reply_markup = InlineKeyboardMarkup(keyboard)
-            text = f"Ви не зареєстровані. Натисніть нижче, щоб зареєструватися:"
+            text = f"Вы не зарегистрированы. Нажмите ниже, чтобы зарегистрироваться:"
             
             if is_callback:
                 await update.callback_query.edit_message_text(text, reply_markup=reply_markup)
@@ -67,8 +67,8 @@ async def show_main_menu(user_id: int, user_name: str, update: Update, is_callba
         elif not has_user_group(user_id):
             # Registered but unassigned: do not show navigation that leads to user menu
             text = (
-                f"Ви зареєстровані, але ще не призначені до жодного відділу.\n\n"
-                f"Будь ласка, зверніться до свого адміністратора, щоб додати вас до відділу."
+                f"Вы зарегистрированы, но еще не назначены ни в один отдел.\n\n"
+                f"Пожалуйста, обратитесь к своему администратору, чтобы добавить вас в отдел."
             )
             
             if is_callback:
@@ -79,11 +79,11 @@ async def show_main_menu(user_id: int, user_name: str, update: Update, is_callba
         else:
             # Worker with group - show tasks
             keyboard = [
-                [InlineKeyboardButton("📋 Задачі", callback_data="view_tasks_menu")],
-                [InlineKeyboardButton("🆕 Створити задачу", callback_data="create_task")],
+                [InlineKeyboardButton("📋 Задачи", callback_data="view_tasks_menu")],
+                [InlineKeyboardButton("🆕 Создать задачу", callback_data="create_task")],
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
-            text = f"Панель завдань:"
+            text = f"Приветствую, {user_name}!\n\nГлавное меню:"
             
             if is_callback:
                 await update.callback_query.edit_message_text(text, reply_markup=reply_markup)
@@ -94,7 +94,10 @@ async def show_main_menu(user_id: int, user_name: str, update: Update, is_callba
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /start command - show role-specific menu or registration prompt."""
     user_id = update.effective_user.id
-    user_name = update.effective_user.first_name
+    
+    # Get user's name from database (or use Telegram first name as fallback)
+    user = get_user_by_id(user_id)
+    user_name = user['name'] if user else update.effective_user.first_name
     
     await show_main_menu(user_id, user_name, update, is_callback=False)
 

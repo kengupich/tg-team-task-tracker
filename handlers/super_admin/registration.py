@@ -28,16 +28,16 @@ async def super_view_registration_requests(update: Update, context: ContextTypes
     if not requests:
         keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="super_manage_users")]]
         await query.edit_message_text(
-            "📋 Немає нових запитів на реєстрацію.",
+            "📋 Нет новых запросов на регистрацию.",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
         return
     
-    text = f"🔔 Запити на реєстрацію ({len(requests)}):\n\n"
+    text = f"🔔 Запросы на регистрацию ({len(requests)}):\n\n"
     keyboard = []
     
     for req in requests:
-        username_info = f"@{req['username']}" if req['username'] else "немає username"
+        username_info = f"@{req['username']}" if req['username'] else "нет username"
         text += f"• {req['name']} ({username_info})\n"
         keyboard.append([
             InlineKeyboardButton(
@@ -60,22 +60,22 @@ async def super_review_registration_request(update: Update, context: ContextType
     request = next((r for r in requests if r['request_id'] == request_id), None)
     
     if not request:
-        await query.edit_message_text("❌ Запит не знайдено або вже оброблено.")
+        await query.edit_message_text("❌ Запрос не найден или уже обработан.")
         return
     
-    username_info = f"@{request['username']}" if request['username'] else "немає username"
+    username_info = f"@{request['username']}" if request['username'] else "нет username"
     text = (
-        f"📋 Запит на реєстрацію\n\n"
-        f"👤 Ім'я: {request['name']}\n"
+        f"📋 Запрос на регистрацию\n\n"
+        f"👤 Имя: {request['name']}\n"
         f"🆔 Telegram ID: {request['user_id']}\n"
         f"📱 Username: {username_info}\n"
-        f"📅 Дата запиту: {request['requested_at']}\n\n"
-        f"Схвалити цього користувача?"
+        f"📅 Дата запроса: {request['requested_at']}\n\n"
+        f"Утвердить этого пользователя?"
     )
     
     keyboard = [
-        [InlineKeyboardButton("✅ Схвалити", callback_data=f"super_approve_request_{request_id}")],
-        [InlineKeyboardButton("❌ Відхилити", callback_data=f"super_reject_request_{request_id}")],
+        [InlineKeyboardButton("✅ Утвердить", callback_data=f"super_approve_request_{request_id}")],
+        [InlineKeyboardButton("❌ Отклонить", callback_data=f"super_reject_request_{request_id}")],
         [InlineKeyboardButton("⬅️ Назад", callback_data="super_view_registration_requests")],
     ]
     
@@ -96,7 +96,7 @@ async def super_approve_registration_request_handler(update: Update, context: Co
     request = next((r for r in requests if r['request_id'] == request_id), None)
     
     if not request:
-        await query.edit_message_text("❌ Запит не знайдено або вже оброблено.")
+        await query.edit_message_text("❌ Запрос не найден или уже обработан.")
         return
     
     if approve_registration_request(request_id, reviewer_id):
@@ -105,21 +105,21 @@ async def super_approve_registration_request_handler(update: Update, context: Co
             await context.bot.send_message(
                 chat_id=request['user_id'],
                 text=(
-                    f"✅ Ваш запит на реєстрацію схвалено!\n\n"
-                    f"Тепер ви можете користуватися ботом.\n"
-                    f"Адміністратор додасть вас до відділу."
+                    f"✅ Ваш запрос на регистрацию утвержден!\n\n"
+                    f"Теперь вы можете пользоваться ботом.\n"
+                    f"Администратор добавит вас в отдел."
                 )
             )
         except Exception as e:
             logger.error(f"Failed to notify user {request['user_id']} about approval: {e}")
         
-        keyboard = [[InlineKeyboardButton("⬅️ До запитів", callback_data="super_view_registration_requests")]]
+        keyboard = [[InlineKeyboardButton("⬅️ К запросам", callback_data="super_view_registration_requests")]]
         await query.edit_message_text(
-            f"✅ Запит схвалено!\n\nКористувач {request['name']} тепер зареєстрований.",
+            f"✅ Запрос утвержден!\n\nПользователь {request['name']} теперь зарегистрирован.",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
     else:
-        await query.edit_message_text("❌ Помилка при схваленні запиту.")
+        await query.edit_message_text("❌ Ошибка при утверждении запроса.")
 
 
 async def super_reject_registration_request_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -136,7 +136,7 @@ async def super_reject_registration_request_handler(update: Update, context: Con
     request = next((r for r in requests if r['request_id'] == request_id), None)
     
     if not request:
-        await query.edit_message_text("❌ Запит не знайдено або вже оброблено.")
+        await query.edit_message_text("❌ Запрос не найден или уже обработан.")
         return
     
     if reject_registration_request(request_id, reviewer_id):
@@ -145,17 +145,17 @@ async def super_reject_registration_request_handler(update: Update, context: Con
             await context.bot.send_message(
                 chat_id=request['user_id'],
                 text=(
-                    f"❌ Ваш запит на реєстрацію відхилено.\n\n"
-                    f"Будь ласка, зв'яжіться з адміністратором для з'ясування деталей."
+                    f"❌ Ваш запрос на регистрацию отклонен.\n\n"
+                    f"Пожалуйста, свяжитесь с администратором для уточнения деталей."
                 )
             )
         except Exception as e:
             logger.error(f"Failed to notify user {request['user_id']} about rejection: {e}")
         
-        keyboard = [[InlineKeyboardButton("⬅️ До запитів", callback_data="super_view_registration_requests")]]
+        keyboard = [[InlineKeyboardButton("⬅️ К запросам", callback_data="super_view_registration_requests")]]
         await query.edit_message_text(
-            f"❌ Запит відхилено.\n\nКористувач {request['name']} не буде зареєстрований.",
+            f"❌ Запрос отклонен.\n\nПользователь {request['name']} не будет зарегистрирован.",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
     else:
-        await query.edit_message_text("❌ Помилка при відхиленні запиту.")
+        await query.edit_message_text("❌ Ошибка при отклонении запроса.")

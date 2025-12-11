@@ -25,62 +25,11 @@ from telegram.ext import (
     filters,
 )
 from database import (
-    init_db,
-    create_group,
-    get_all_groups,
-    get_group,
-    get_all_users,
-    get_users_without_group,
-    get_group_by_admin_id,
-    update_group_admin,
-    get_group_users,
-    add_user_to_group,
-    remove_user_from_group,
-    get_user_groups,
-    remove_user,
-    get_user_by_id,
-    ban_user,
-    unban_user,
-    delete_user,
-    remove_user_from_all_groups,
-    cancel_user_tasks,
-    user_exists,
-    register_user,
-    is_user_registered,
-    has_user_group,
-    create_task,
-    get_task_by_id,
-    get_group_tasks,
-    get_user_tasks,
-    update_task_assignment,
-    update_task_status,
-    add_task_media,
-    get_task_media,
-    remove_task_media,
-    set_user_name,
-    update_group_name,
-    delete_group,
-    delete_task,
-    create_registration_request,
-    get_pending_registration_requests,
-    approve_registration_request,
-    reject_registration_request,
-    get_registration_request_by_user_id,
-    get_users_for_task_assignment,
-    get_admin_groups,
+    init_db
 )
 
 # Import utilities and handlers
-from utils.helpers import (
-    UKR_MONTHS, UKR_DAYS_SHORT, TIME_OPTIONS,
-    generate_calendar, validate_time_format, create_back_button
-)
-from utils.permissions import (
-    is_super_admin, is_group_admin, get_user_group_id, can_edit_task
-)
 from handlers.notifications import (
-    send_task_assignment_notification,
-    send_status_change_notification,
     send_deadline_reminder
 )
 from handlers.common import start, help_command, cancel, show_main_menu
@@ -319,7 +268,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     except Exception as e:
         logger.exception("Error while handling callback '%s': %s", data, e)
         try:
-            await query.answer("❌ Виникла помилка під час обробки вашої дії. Помилка була зафіксована.")
+            await query.answer("❌ Возникла ошибка при обработке вашего действия. Ошибка была зафиксирована.")
         except Exception:
             pass
         return None

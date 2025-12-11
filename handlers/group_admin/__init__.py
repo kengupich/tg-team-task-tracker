@@ -44,12 +44,12 @@ async def admin_manage_users(update: Update, context: ContextTypes.DEFAULT_TYPE)
     group_id = get_user_group_id(user_id)
     users = get_group_users(group_id)
     
-    user_list = f"👥 працівників у відділі ({len(users)}):\n\n"
+    user_list = f"👥 работников в отделе ({len(users)}):\n\n"
     for u in users:
         user_list += f"• {u['name']} (ID: {u['user_id']})\n"
     
     keyboard = [
-        [InlineKeyboardButton("➕ Додати працівника", callback_data="admin_add_user")],
+        [InlineKeyboardButton("🆕 Добавить работника", callback_data="admin_add_user")],
         [InlineKeyboardButton("⬅️ Назад", callback_data="start_menu")],
     ]
     

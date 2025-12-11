@@ -22,8 +22,8 @@ async def view_tasks_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     keyboard = []
     
     # Common filters for all users
-    keyboard.append([InlineKeyboardButton("📤 Доручив", callback_data="filter_tasks_created")])
-    keyboard.append([InlineKeyboardButton("📥 Виконую", callback_data="filter_tasks_assigned")])
+    keyboard.append([InlineKeyboardButton("📤 Поручил", callback_data="filter_tasks_created")])
+    keyboard.append([InlineKeyboardButton("📥 Выполняю", callback_data="filter_tasks_assigned")])
     
     # Admin-specific filters
     if is_group_admin(user_id):
@@ -31,24 +31,24 @@ async def view_tasks_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         
         if len(admin_groups) > 1:
             # Multiple groups - show selection
-            keyboard.append([InlineKeyboardButton("📂 Задачі групи", callback_data="filter_tasks_select_group")])
+            keyboard.append([InlineKeyboardButton("📂 Задачи группы", callback_data="filter_tasks_select_group")])
         elif len(admin_groups) == 1:
             # Single group - direct access
             keyboard.append([InlineKeyboardButton(
-                f"📂 Задачі групи: {admin_groups[0]['name']}", 
+                f"📂 Задачи группы: {admin_groups[0]['name']}", 
                 callback_data=f"filter_tasks_group_{admin_groups[0]['group_id']}"
             )])
     
     # Super admin filter
     if is_super_admin(user_id):
-        keyboard.append([InlineKeyboardButton("🌐 Усі задачі", callback_data="filter_tasks_all")])
-        keyboard.append([InlineKeyboardButton("📂 Задачі за групами", callback_data="filter_tasks_select_group")])
+        keyboard.append([InlineKeyboardButton("🌐 Все задачи", callback_data="filter_tasks_all")])
+        keyboard.append([InlineKeyboardButton("📂 Задачи по группам", callback_data="filter_tasks_select_group")])
     
-    keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="start_menu"),InlineKeyboardButton("🆕 Створити задачу", callback_data="create_task")],)
+    keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="start_menu"),InlineKeyboardButton("🆕 Создать задачу", callback_data="create_task")],)
     
     reply_markup = InlineKeyboardMarkup(keyboard)
     await query.edit_message_text(
-        "📋 Задачі\n\nОберіть фільтр:",
+        "📋 Задачи\n\nВыберите фильтр:",
         reply_markup=reply_markup
     )
 
@@ -65,7 +65,7 @@ async def filter_tasks_created(update: Update, context: ContextTypes.DEFAULT_TYP
     if not tasks:
         keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="view_tasks_menu")]]
         await query.edit_message_text(
-            "📤 Доручив\n\nНемає задач, які ви доручили.",
+            "📤 Поручил\n\nНет задач, которые вы поручили.",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
         return
@@ -89,7 +89,7 @@ async def filter_tasks_created(update: Update, context: ContextTypes.DEFAULT_TYP
     
     keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="view_tasks_menu")])
     await query.edit_message_text(
-        f"📤 Доручив ({len(tasks)}):\n\nОберіть задачу для перегляду:",
+        f"📤 Поручил ({len(tasks)}):\n\nВыберите задачу для просмотра:",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
@@ -105,7 +105,7 @@ async def filter_tasks_assigned(update: Update, context: ContextTypes.DEFAULT_TY
     if not tasks:
         keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="view_tasks_menu")]]
         await query.edit_message_text(
-            "📥 Виконую\n\nНемає задач, призначених вам.",
+            "📥 Выполняю\n\nНет задач, назначенных вам.",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
         return
@@ -129,7 +129,7 @@ async def filter_tasks_assigned(update: Update, context: ContextTypes.DEFAULT_TY
     
     keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="view_tasks_menu")])
     await query.edit_message_text(
-        f"📥 Виконую ({len(tasks)}):\n\nОберіть задачу для перегляду:",
+        f"📥 Выполняю ({len(tasks)}):\n\nВыберите задачу для просмотра:",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
@@ -150,7 +150,7 @@ async def filter_tasks_select_group(update: Update, context: ContextTypes.DEFAUL
     if not groups:
         keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="view_tasks_menu")]]
         await query.edit_message_text(
-            "Немає доступних груп.",
+            "Нет доступных групп.",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
         return
@@ -167,7 +167,7 @@ async def filter_tasks_select_group(update: Update, context: ContextTypes.DEFAUL
     keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="view_tasks_menu")])
     reply_markup = InlineKeyboardMarkup(keyboard)
     await query.edit_message_text(
-        "Оберіть групу:",
+        "Выберите группу:",
         reply_markup=reply_markup
     )
 
@@ -180,7 +180,7 @@ async def filter_tasks_group(update: Update, context: ContextTypes.DEFAULT_TYPE)
     group_id = int(query.data.split("_")[-1])
     
     group = get_group(group_id)
-    group_name = group['name'] if group else "Невідомо"
+    group_name = group['name'] if group else "Неизвестно"
     
     # Get users in this group
     users = get_group_users(group_id)
@@ -188,7 +188,7 @@ async def filter_tasks_group(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if not users:
         keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="filter_tasks_select_group")]]
         await query.edit_message_text(
-            f"📂 {group_name}\n\nНемає працівників у цій групі.",
+            f"📂 {group_name}\n\nНет сотрудников в этой группе.",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
         return
@@ -199,17 +199,17 @@ async def filter_tasks_group(update: Update, context: ContextTypes.DEFAULT_TYPE)
     # Add "All tasks" button
     tasks = get_group_tasks(group_id)
     keyboard.append([InlineKeyboardButton(
-        f"📋 Усі задачі ({len(tasks)})",
+        f"📋 Все задачи ({len(tasks)})",
         callback_data=f"filter_group_all_tasks_{group_id}"
     )])
     
     # Add separator
-    keyboard.append([InlineKeyboardButton("👥 Фільтр по виконавцю:", callback_data="ignore")])
+    keyboard.append([InlineKeyboardButton("👥 Фильтр по исполнителю:", callback_data="ignore")])
     
     # Add worker buttons
     for user in users:
         user_id = user['user_id']
-        user_name = user.get('name') or user.get('username', 'Невідомо')
+        user_name = user.get('name') or user.get('username', 'Неизвестно')
         
         # Count tasks for this user in this group
         user_tasks = get_user_tasks(user_id)
@@ -224,7 +224,7 @@ async def filter_tasks_group(update: Update, context: ContextTypes.DEFAULT_TYPE)
     keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="filter_tasks_select_group")])
     
     await query.edit_message_text(
-        f"📂 {group_name}\n\nОберіть фільтр:",
+        f"📂 {group_name}\n\nВыберите фильтр:",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
@@ -238,12 +238,12 @@ async def filter_group_all_tasks(update: Update, context: ContextTypes.DEFAULT_T
     
     tasks = get_group_tasks(group_id)
     group = get_group(group_id)
-    group_name = group['name'] if group else "Невідомо"
+    group_name = group['name'] if group else "Неизвестно"
     
     if not tasks:
         keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data=f"filter_tasks_group_{group_id}")]]
         await query.edit_message_text(
-            f"📂 {group_name}\n\nНемає задач у цій групі.",
+            f"📂 {group_name}\n\nНет задач в этой группе.",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
         return
@@ -267,7 +267,7 @@ async def filter_group_all_tasks(update: Update, context: ContextTypes.DEFAULT_T
     
     keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data=f"filter_tasks_group_{group_id}")])
     await query.edit_message_text(
-        f"📂 {group_name} - Усі задачі ({len(tasks)}):\n\nОберіть задачу для перегляду:",
+        f"📂 {group_name} - Все задачи ({len(tasks)}):\n\nВыберите задачу для просмотра:",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
@@ -289,15 +289,15 @@ async def filter_tasks_by_assignee(update: Update, context: ContextTypes.DEFAULT
     tasks = [t for t in all_user_tasks if t.get('group_id') == group_id]
     
     group = get_group(group_id)
-    group_name = group['name'] if group else "Невідомо"
+    group_name = group['name'] if group else "Неизвестно"
     
     assignee = get_user_by_id(assignee_id)
-    assignee_name = assignee.get('name') or assignee.get('username', 'Невідомо') if assignee else "Невідомо"
+    assignee_name = assignee.get('name') or assignee.get('username', 'Неизвестно') if assignee else "Неизвестно"
     
     if not tasks:
         keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data=f"filter_tasks_group_{group_id}")]]
         await query.edit_message_text(
-            f"📂 {group_name}\n👤 {assignee_name}\n\nНемає задач для цього виконавця.",
+            f"📂 {group_name}\n👤 {assignee_name}\n\nНет задач для этого исполнителя.",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
         return
@@ -321,7 +321,7 @@ async def filter_tasks_by_assignee(update: Update, context: ContextTypes.DEFAULT
     
     keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data=f"filter_tasks_group_{group_id}")])
     await query.edit_message_text(
-        f"📂 {group_name}\n👤 {assignee_name} ({len(tasks)}):\n\nОберіть задачу для перегляду:",
+        f"📂 {group_name}\n👤 {assignee_name} ({len(tasks)}):\n\nВыберите задачу для просмотра:",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
@@ -335,7 +335,7 @@ async def filter_tasks_all(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     
     # Security check
     if not is_super_admin(user_id):
-        await query.answer("У вас немає доступу до цієї функції", show_alert=True)
+        await query.answer("У вас нет доступа к этой функции", show_alert=True)
         return
     
     from database import get_all_tasks
@@ -344,7 +344,7 @@ async def filter_tasks_all(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if not tasks:
         keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="view_tasks_menu")]]
         await query.edit_message_text(
-            "🌐 Усі задачі\n\nНемає задач у системі.",
+            "🌐 Все задачи\n\nНет задач в системе.",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
         return
@@ -361,11 +361,11 @@ async def filter_tasks_all(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         if status in tasks_by_status:
             tasks_by_status[status].append(task)
     
-    message_text = f"🌐 Усі задачі ({len(tasks)}):\n\n"
-    message_text += f"⏳ Очікують: {len(tasks_by_status['pending'])}\n"
-    message_text += f"🔄 В роботі: {len(tasks_by_status['in_progress'])}\n"
-    message_text += f"✅ Завершені: {len(tasks_by_status['completed'])}\n\n"
-    message_text += "Оберіть задачу для перегляду:"
+    message_text = f"🌐 Все задачи ({len(tasks)}):\n\n"
+    message_text += f"⏳ Ожидают: {len(tasks_by_status['pending'])}\n"
+    message_text += f"🔄 В работе: {len(tasks_by_status['in_progress'])}\n"
+    message_text += f"✅ Завершены: {len(tasks_by_status['completed'])}\n\n"
+    message_text += "Выберите задачу для просмотра:"
     
     keyboard = []
     for task in tasks[:20]:

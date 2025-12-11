@@ -40,31 +40,31 @@ async def super_manage_groups(update: Update, context: ContextTypes.DEFAULT_TYPE
     keyboard = []
     if not groups:
         keyboard = [
-            [InlineKeyboardButton(f"🆕 Додати відділ", callback_data="super_add_group")],
+            [InlineKeyboardButton(f"🆕 Добавить отдел", callback_data="super_add_group")],
         ]
         keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="start_menu")])
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text("Наразі відділи відсутні.",reply_markup=reply_markup)
+        await query.edit_message_text("Пока отделов нет.",reply_markup=reply_markup)
     
     else:
         for group in groups:
             # Get admin name if admin exists
-            admin_name = "Не призначено"
+            admin_name = "Не назначен"
             if group['admin_id']:
                 admin = get_user_by_id(group['admin_id'])
                 if admin:
-                    admin_name = admin.get('name', 'Невідомо')
+                    admin_name = admin.get('name', 'Неизвестно')
             
             keyboard.append([
                 InlineKeyboardButton(
-                    f"📌 {group['name']} (Адміністратор: {admin_name})",
+                    f"📌 {group['name']} (Администратор: {admin_name})",
                     callback_data=f"super_admin_select_{group['group_id']}"
                 )
             ])
-        keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="start_menu"), InlineKeyboardButton(f"🆕 Додати відділ", callback_data="super_add_group")])
+        keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="start_menu"), InlineKeyboardButton(f"🆕 Добавить отдел", callback_data="super_add_group")])
         
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text("Виберіть відділ для керування:", reply_markup=reply_markup)
+        await query.edit_message_text("Выберите отдел для управления:", reply_markup=reply_markup)
 
 
 async def super_add_group(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -72,7 +72,7 @@ async def super_add_group(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     query = update.callback_query
     await query.answer()
     # Ask for new group name
-    await query.edit_message_text("Введіть назву відділу:")
+    await query.edit_message_text("Введите название отдела:")
     return SUPER_ADD_GROUP_NAME
 
 
@@ -82,11 +82,11 @@ async def super_add_group_name_input(update: Update, context: ContextTypes.DEFAU
     context.user_data["new_group_name"] = group_name
 
     keyboard = [
-        [InlineKeyboardButton("✅ Підтвердити", callback_data="super_add_group_confirm")],
-        [InlineKeyboardButton("⬅️ Скасувати", callback_data="super_manage_groups")],
+        [InlineKeyboardButton("✅ Подтвердить", callback_data="super_add_group_confirm")],
+        [InlineKeyboardButton("⬅️ Отменить", callback_data="super_manage_groups")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text(f"Підтвердіть створення відділу: {group_name}", reply_markup=reply_markup)
+    await update.message.reply_text(f"Подтвердите создание отдела: {group_name}", reply_markup=reply_markup)
     # end the message-based step; the confirmation will come via callback buttons
     return ConversationHandler.END
 
@@ -100,14 +100,14 @@ async def super_add_group_confirm(update: Update, context: ContextTypes.DEFAULT_
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     if not group_name:
-        await query.edit_message_text("❌ Назва відділу не вказана.", reply_markup=reply_markup)
+        await query.edit_message_text("❌ Название отдела не указано.", reply_markup=reply_markup)
         return
 
     group_id = create_group(group_name)
     if group_id:
-        await query.edit_message_text(f"✅ Відділ '{group_name}' створено (ID: {group_id}).", reply_markup=reply_markup)
+        await query.edit_message_text(f"✅ Отдел '{group_name}' создан (ID: {group_id}).", reply_markup=reply_markup)
     else:
-        await query.edit_message_text("❌ Не вдалося створити відділ (можливо, дублікати імен).", reply_markup=reply_markup)
+        await query.edit_message_text("❌ Не удалось создать отдел (возможно, дубликаты имен).", reply_markup=reply_markup)
 
     context.user_data.pop("new_group_name", None)
 
@@ -120,20 +120,20 @@ async def super_rename_group(update: Update, context: ContextTypes.DEFAULT_TYPE)
     group_id = context.user_data.get("selected_group_id")
     
     if not group_id:
-        await query.edit_message_text("❌ Помилка: група не вибрана.")
+        await query.edit_message_text("❌ Ошибка: группа не выбрана.")
         return ConversationHandler.END
     
     group = get_group(group_id)
     
     if not group:
-        await query.edit_message_text("❌ Помилка: група не знайдена.")
+        await query.edit_message_text("❌ Ошибка: группа не найдена.")
         return ConversationHandler.END
 
     keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="super_manage_groups")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     await query.edit_message_text(
-        f"Поточна назва: {group['name']}\n\nВведіть нову назву відділу:", reply_markup=reply_markup
+        f"Текущее название: {group['name']}\n\nВведите новое название отдела:", reply_markup=reply_markup
     )
     return SUPER_RENAME_GROUP_INPUT
 
@@ -148,12 +148,12 @@ async def super_rename_group_input(update: Update, context: ContextTypes.DEFAULT
     
     if update_group_name(group_id, new_name):
         await update.message.reply_text(
-            f"✅ Назву відділу змінено на '{new_name}'",
+            f"✅ Название отдела изменено на '{new_name}'",
             reply_markup=reply_markup
         )
     else:
         await update.message.reply_text(
-            "❌ Не вдалося змінити назву (можливо, назва вже існує)",
+            "❌ Не удалось изменить название (возможно, название уже существует)",
             reply_markup=reply_markup
         )
     
@@ -179,14 +179,14 @@ async def super_delete_group(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
     
     keyboard = [
-        [InlineKeyboardButton("✅ Так, видалити", callback_data="super_delete_group_confirm")],
-        [InlineKeyboardButton("❌ Скасувати", callback_data="super_admin_group_edit")],
+        [InlineKeyboardButton("✅ Да, удалить", callback_data="super_delete_group_confirm")],
+        [InlineKeyboardButton("❌ Отменить", callback_data="super_admin_group_edit")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     await query.edit_message_text(
-        f"⚠️ Ви впевнені, що хочете видалити відділ '{group['name']}'?\n\n"
-        f"Всі працівники будуть відв'язані від цього відділу.",
+        f"⚠️ Вы уверены, что хотите удалить отдел '{group['name']}'?\n\n"
+        f"Все сотрудники будут отвязаны от этого отдела.",
         reply_markup=reply_markup
     )
 
@@ -205,12 +205,12 @@ async def super_delete_group_confirm(update: Update, context: ContextTypes.DEFAU
     
     if delete_group(group_id):
         await query.edit_message_text(
-            f"✅ Відділ '{group_name}' успішно видалено",
+            f"✅ Отдел '{group_name}' успешно удален",
             reply_markup=reply_markup
         )
     else:
         await query.edit_message_text(
-            "❌ Не вдалося видалити відділ",
+            "❌ Не удалось удалить отдел",
             reply_markup=reply_markup
         )
     
@@ -239,14 +239,14 @@ async def super_admin_select(update: Update, context: ContextTypes.DEFAULT_TYPE)
             admin_info = f"{admin.get('name', 'Невідомо')}"
     
     keyboard = [
-        [InlineKeyboardButton("✏️ Редагувати відділ", callback_data="super_admin_group_edit")],
-        [InlineKeyboardButton("📋 Переглянути працівників", callback_data="super_view_group_users")],
+        [InlineKeyboardButton("✏️ Редактировать отдел", callback_data="super_admin_group_edit")],
+        [InlineKeyboardButton("📋 Просмотреть сотрудников", callback_data="super_view_group_users")],
         [InlineKeyboardButton("⬅️ Назад", callback_data="super_manage_groups")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     await query.edit_message_text(
-        f"Відділ: {group['name']}\nАдміністратор: {admin_info}",
+        f"Отдел: {group['name']}\nАдминистратор: {admin_info}",
         reply_markup=reply_markup
     )
 
@@ -277,15 +277,15 @@ async def super_admin_group_edit(update: Update, context: ContextTypes.DEFAULT_T
             admin_info = f"{admin.get('name', 'Невідомо')}"
     
     keyboard = [
-        [InlineKeyboardButton("✏️ Змінити Адміністратора", callback_data="super_change_admin")],
-        [InlineKeyboardButton("📝 Змінити Назву", callback_data="super_rename_group")],
-        [InlineKeyboardButton("🗑️ Видалити Відділ", callback_data="super_delete_group")],
+        [InlineKeyboardButton("✏️ Изменить Администратора", callback_data="super_change_admin")],
+        [InlineKeyboardButton("📝 Изменить Название", callback_data="super_rename_group")],
+        [InlineKeyboardButton("🗑️ Удалить Отдел", callback_data="super_delete_group")],
         [InlineKeyboardButton("⬅️ Назад", callback_data="super_manage_groups")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     await query.edit_message_text(
-        f"Відділ: {group['name']}\nАдміністратор: {admin_info}",
+        f"Отдел: {group['name']}\nАдминистратор: {admin_info}",
         reply_markup=reply_markup
     )
 
@@ -301,7 +301,7 @@ async def super_change_admin(update: Update, context: ContextTypes.DEFAULT_TYPE)
     
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text(
-            "Немає доступних працівників.",
+            "Нет доступных сотрудников.",
             reply_markup=reply_markup
         )
         return ConversationHandler.END
@@ -320,7 +320,7 @@ async def super_change_admin(update: Update, context: ContextTypes.DEFAULT_TYPE)
     
     reply_markup = InlineKeyboardMarkup(keyboard)
     await query.edit_message_text(
-        "Виберіть нового адміністратора зі списку:",
+        "Выберите нового администратора из списка:",
         reply_markup=reply_markup
     )
     return WAITING_ADMIN_SELECT
@@ -349,12 +349,12 @@ async def super_select_new_admin(update: Update, context: ContextTypes.DEFAULT_T
             logger.exception("Failed to update legacy groups.admin_id after add_group_admin")
 
         await query.edit_message_text(
-            f"✅ Користувача призначено адміністратором відділу.",
+            f"✅ Пользователя назначено администратором отдела.",
             reply_markup=reply_markup
         )
     else:
         await query.edit_message_text(
-            "❌ Не вдалося призначити адміністратора.",
+            "❌ Не удалось назначить администратора.",
             reply_markup=reply_markup
         )
     
@@ -379,20 +379,20 @@ async def super_back_to_group(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
     
     keyboard = [
-        [InlineKeyboardButton("✏️ Редагувати відділ", callback_data="super_admin_group_edit")],
-        [InlineKeyboardButton("📋 Переглянути працівників", callback_data="super_view_group_users")],
+        [InlineKeyboardButton("✏️ Редактировать отдел", callback_data="super_admin_group_edit")],
+        [InlineKeyboardButton("📋 Просмотреть сотрудников", callback_data="super_view_group_users")],
         [InlineKeyboardButton("⬅️ Назад", callback_data="super_manage_groups")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    admin_name = "Не призначено"
+    admin_name = "Не назначен"
     if group.get('admin_id'):
         admin = get_user_by_id(group['admin_id'])
         if admin:
-            admin_name = admin.get('name', 'Невідомо')
+            admin_name = admin.get('name', 'Неизвестно')
     
     await query.edit_message_text(
-        f"Відділ: {group['name']}\nПоточний адміністратор: {admin_name}",
+        f"Отдел: {group['name']}\nТекущий администратор: {admin_name}",
         reply_markup=reply_markup
     )
 
@@ -475,27 +475,27 @@ async def super_edit_members_confirm(update: Update, context: ContextTypes.DEFAU
             to_remove.append(uid)
 
     # Build preview text
-    preview_lines = ["Перелік змін перед підтвердженням:\n"]
+    preview_lines = ["Перечень изменений перед подтверждением:\n"]
     if to_add:
-        preview_lines.append("Додати до цієї групи:")
+        preview_lines.append("Добавить в эту группу:")
         for uid in to_add:
             u = get_user_by_id(uid)
             preview_lines.append(f"• {u['name']} (ID: {uid})")
     else:
-        preview_lines.append("Додати до цієї групи: немає")
+        preview_lines.append("Добавить в эту группу: нет")
 
     if to_remove:
-        preview_lines.append("\nВидалити з цієї групи:")
+        preview_lines.append("\nУдалить из этой группы:")
         for uid in to_remove:
             u = get_user_by_id(uid)
             preview_lines.append(f"• {u['name']} (ID: {uid})")
     else:
-        preview_lines.append("\nВидалити з цієї групи: немає")
+        preview_lines.append("\nУдалить из этой группы: нет")
 
     keyboard = [
-        [InlineKeyboardButton("✅ Застосувати зміни", callback_data="super_edit_members_apply")],
-        [InlineKeyboardButton("⬅️ Повернутись", callback_data="super_edit_members_back")],
-        [InlineKeyboardButton("❌ Скасувати", callback_data="super_edit_members_cancel")],
+        [InlineKeyboardButton("✅ Применить изменения", callback_data="super_edit_members_apply")],
+        [InlineKeyboardButton("⬅️ Вернуться", callback_data="super_edit_members_back")],
+        [InlineKeyboardButton("❌ Отменить", callback_data="super_edit_members_cancel")],
     ]
 
     await query.edit_message_text("\n".join(preview_lines), reply_markup=InlineKeyboardMarkup(keyboard))
@@ -549,7 +549,7 @@ async def super_edit_members_apply(update: Update, context: ContextTypes.DEFAULT
     context.user_data.pop('edit_members_all_users', None)
 
     keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="super_admin_group_edit")]]
-    await query.edit_message_text(f"✅ Застосовано змін: {applied}", reply_markup=InlineKeyboardMarkup(keyboard))
+    await query.edit_message_text(f"✅ Применено изменений: {applied}", reply_markup=InlineKeyboardMarkup(keyboard))
     return ConversationHandler.END
 
 
@@ -563,7 +563,7 @@ async def super_edit_members_cancel(update: Update, context: ContextTypes.DEFAUL
     context.user_data.pop('edit_members_all_users', None)
 
     keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="super_admin_group_edit")]]
-    await query.edit_message_text("❌ Зміни скасовано.", reply_markup=InlineKeyboardMarkup(keyboard))
+    await query.edit_message_text("❌ Изменения отменены.", reply_markup=InlineKeyboardMarkup(keyboard))
     return ConversationHandler.END
 
 
@@ -583,7 +583,7 @@ async def _render_edit_members_page(query, context, group_id, page=0, page_size=
     page_users = all_users[start:end]
 
     keyboard = []
-    text_lines = [f"Редагування списку працівників — сторінка {page+1}/{max_page+1}:\n\nОберіть працівників для цього відділу (працівник може належати до декількох відділів):"]
+    text_lines = [f"Редактирование списка сотрудников — страница {page+1}/{max_page+1}:\n\nВыберите сотрудников для этого отдела (сотрудник может принадлежать к нескольким отделам):"]
 
     for user in page_users:
         uid = user['user_id']
@@ -592,7 +592,7 @@ async def _render_edit_members_page(query, context, group_id, page=0, page_size=
         if user_groups:
             group_names = ', '.join([g['name'] for g in user_groups])
         else:
-            group_names = 'вільний'
+            group_names = 'свободный'
         checked = '☑' if selection.get(uid) else '☐'
         label = f"{checked} {user.get('name')} — {group_names}"
         # include page in callback so toggle returns to same page
@@ -600,15 +600,15 @@ async def _render_edit_members_page(query, context, group_id, page=0, page_size=
 
     nav_row = []
     if page > 0:
-        nav_row.append(InlineKeyboardButton("⬅️ Попередня", callback_data=f"super_edit_members_page_{group_id}_{page-1}"))
+        nav_row.append(InlineKeyboardButton("⬅️ Предыдущая", callback_data=f"super_edit_members_page_{group_id}_{page-1}"))
     if page < max_page:
-        nav_row.append(InlineKeyboardButton("Наступна ➡️", callback_data=f"super_edit_members_page_{group_id}_{page+1}"))
+        nav_row.append(InlineKeyboardButton("Следующая ➡️", callback_data=f"super_edit_members_page_{group_id}_{page+1}"))
     if nav_row:
         keyboard.append(nav_row)
 
     # Confirm / Back / Cancel
-    keyboard.append([InlineKeyboardButton("✅ Підтвердити", callback_data="super_edit_members_confirm")])
-    keyboard.append([InlineKeyboardButton("❌ Скасувати", callback_data="super_edit_members_cancel")])
+    keyboard.append([InlineKeyboardButton("✅ Подтвердить", callback_data="super_edit_members_confirm")])
+    keyboard.append([InlineKeyboardButton("❌ Отменить", callback_data="super_edit_members_cancel")])
 
     reply_markup = InlineKeyboardMarkup(keyboard)
     await query.edit_message_text("\n".join(text_lines), reply_markup=reply_markup)
@@ -623,7 +623,7 @@ async def super_edit_members_page(update: Update, context: ContextTypes.DEFAULT_
         group_id = int(parts[-2])
         page = int(parts[-1])
     except Exception:
-        await query.edit_message_text("❌ Неправильна сторінка")
+        await query.edit_message_text("❌ Неправильная страница")
         return SUPER_EDIT_GROUP_MEMBERS
 
     await _render_edit_members_page(query, context, group_id, page=page)
@@ -640,16 +640,16 @@ async def super_view_group_users(update: Update, context: ContextTypes.DEFAULT_T
     
     if not users:
         keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="super_manage_users")]]
-        await query.edit_message_text("Немає працівників у цьому відділі.", reply_markup=InlineKeyboardMarkup(keyboard))
+        await query.edit_message_text("Нет сотрудников в этом отделе.", reply_markup=InlineKeyboardMarkup(keyboard))
         return
 
     keyboard = []
-    text = f"Працівники у відділі:\n\n"
+    text = f"Сотрудники в отделе:\n\n"
     for u in users:
-        keyboard.append([InlineKeyboardButton(f"{u['name']}", callback_data=f"super_user_{u['user_id']}")])
+        keyboard.append([InlineKeyboardButton(f"{u['name']}", callback_data=f"super_user_{u['user_id']}")])  
         text += f"• {u['name']} (ID: {u['user_id']})\n"
     # Add Edit list button (open checkbox editor)
-    keyboard.append([InlineKeyboardButton("✏️ Редагувати список", callback_data="super_edit_group_members")])
+    keyboard.append([InlineKeyboardButton("✏️ Редактировать список", callback_data="super_edit_group_members")])
     keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="super_back_to_group")])
     reply_markup = InlineKeyboardMarkup(keyboard)
     

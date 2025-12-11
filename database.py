@@ -37,6 +37,7 @@ def init_db():
     CREATE TABLE IF NOT EXISTS users (
         user_id INTEGER PRIMARY KEY,
         name TEXT NOT NULL,
+        username TEXT,  -- Telegram username (without @)
         group_id INTEGER,
         registered INTEGER DEFAULT 0,  -- 0 = not registered, 1 = registered via password
         banned INTEGER DEFAULT 0,  -- 0 = not banned, 1 = banned
@@ -146,13 +147,14 @@ def init_db():
     conn.close()
     logger.info("Database initialized")
 
-def add_user(user_id, name):
+def add_user(user_id, name, username=None):
     """
     Add a new user to the database.
     
     Args:
         user_id (int): Telegram user ID of the user
         name (str): Name of the user
+        username (str, optional): Telegram username (without @)
         
     Returns:
         bool: True if user was added, False if user already exists
@@ -168,12 +170,12 @@ def add_user(user_id, name):
             return False
         
         cursor.execute(
-            "INSERT INTO users (user_id, name) VALUES (?, ?)",
-            (user_id, name)
+            "INSERT INTO users (user_id, name, username) VALUES (?, ?, ?)",
+            (user_id, name, username)
         )
         conn.commit()
         conn.close()
-        logger.info(f"Added user {name} (ID: {user_id})")
+        logger.info(f"Added user {name} (ID: {user_id}, username: {username})")
         return True
     except Exception as e:
         logger.error(f"Error adding user: {e}")
@@ -1004,7 +1006,7 @@ def get_group_users(group_id):
         return []
 
 
-def register_user(user_id, name):
+def register_user(user_id, name, username=None):
     """
     Register a new user (self-registration via password).
     user is created without a group.
@@ -1012,6 +1014,7 @@ def register_user(user_id, name):
     Args:
         user_id (int): Telegram user ID
         name (str): name/first name
+        username (str, optional): Telegram username (without @)
         
     Returns:
         bool: True if registered, False if already exists
@@ -1029,12 +1032,12 @@ def register_user(user_id, name):
         
         # Create new user without group
         cursor.execute(
-            "INSERT INTO users (user_id, name, group_id, registered) VALUES (?, ?, NULL, 1)",
-            (user_id, name)
+            "INSERT INTO users (user_id, name, username, group_id, registered) VALUES (?, ?, ?, NULL, 1)",
+            (user_id, name, username)
         )
         conn.commit()
         conn.close()
-        logger.info(f"Registered new user {name} (ID: {user_id})")
+        logger.info(f"Registered new user {name} (ID: {user_id}, username: {username})")
         return True
     except Exception as e:
         logger.error(f"Error registering user: {e}")
@@ -1140,7 +1143,7 @@ def get_users_for_task_assignment(creator_id, creator_is_super_admin, creator_is
         creator_admin_groups: List of group_ids where creator is admin (if applicable)
         
     Returns:
-        List of users available for assignment
+        List of users with user_id, name, group_id, group_name, username
     """
     conn = sqlite3.connect(DB_FILE)
     conn.row_factory = sqlite3.Row
@@ -1148,33 +1151,48 @@ def get_users_for_task_assignment(creator_id, creator_is_super_admin, creator_is
     
     try:
         if creator_is_super_admin:
-            # Super admin can assign to anyone
-            cursor.execute("SELECT user_id, name, group_id FROM users WHERE banned = 0 ORDER BY name")
+            # Super admin can assign to anyone - get ALL groups user belongs to
+            cursor.execute("""
+                SELECT DISTINCT u.user_id, u.name, u.username,
+                       GROUP_CONCAT(DISTINCT g.group_id) as group_ids,
+                       GROUP_CONCAT(DISTINCT g.name) as group_names
+                FROM users u
+                LEFT JOIN user_groups ug ON u.user_id = ug.user_id
+                LEFT JOIN groups g ON ug.group_id = g.group_id
+                WHERE u.banned = 0
+                GROUP BY u.user_id, u.name, u.username
+                ORDER BY u.name
+            """)
         elif creator_is_group_admin and creator_admin_groups:
             # Group admin can assign to users in their managed groups + themselves
             group_ids_str = ','.join(str(gid) for gid in creator_admin_groups)
             query = f"""
-                SELECT DISTINCT u.user_id, u.name, u.group_id 
+                SELECT DISTINCT u.user_id, u.name, u.username,
+                       GROUP_CONCAT(DISTINCT g.group_id) as group_ids,
+                       GROUP_CONCAT(DISTINCT g.name) as group_names
                 FROM users u
                 LEFT JOIN user_groups ug ON u.user_id = ug.user_id
+                LEFT JOIN groups g ON ug.group_id = g.group_id
                 WHERE u.banned = 0 AND (
                     ug.group_id IN ({group_ids_str})
                     OR u.user_id = ?
                 )
+                GROUP BY u.user_id, u.name, u.username
                 ORDER BY u.name
             """
             cursor.execute(query, (creator_id,))
         else:
-            # Regular worker can assign to users in their own groups + admins of those groups
+            # Regular worker: ONLY users from worker's OWN groups + admins of those groups
             cursor.execute("""
-                SELECT DISTINCT u.user_id, u.name, u.group_id
+                SELECT DISTINCT u.user_id, u.name, u.username,
+                       GROUP_CONCAT(DISTINCT g.group_id) as group_ids,
+                       GROUP_CONCAT(DISTINCT g.name) as group_names
                 FROM users u
+                LEFT JOIN user_groups ug ON u.user_id = ug.user_id
+                LEFT JOIN groups g ON ug.group_id = g.group_id
                 WHERE u.banned = 0 AND (
-                    u.user_id IN (
-                        SELECT ug.user_id FROM user_groups ug
-                        WHERE ug.group_id IN (
-                            SELECT ug2.group_id FROM user_groups ug2 WHERE ug2.user_id = ?
-                        )
+                    ug.group_id IN (
+                        SELECT ug2.group_id FROM user_groups ug2 WHERE ug2.user_id = ?
                     )
                     OR u.user_id IN (
                         SELECT ga.admin_id FROM group_admins ga
@@ -1183,11 +1201,30 @@ def get_users_for_task_assignment(creator_id, creator_is_super_admin, creator_is
                         )
                     )
                 )
+                GROUP BY u.user_id, u.name, u.username
                 ORDER BY u.name
             """, (creator_id, creator_id))
         
         rows = cursor.fetchall()
-        users = [{"user_id": row["user_id"], "name": row["name"], "group_id": row["group_id"]} for row in rows]
+        users = []
+        for row in rows:
+            # Parse group_ids and group_names
+            group_ids_str = row["group_ids"] if row["group_ids"] else ""
+            group_names_str = row["group_names"] if row["group_names"] else ""
+            
+            # Get first group (for backwards compatibility)
+            group_id = int(group_ids_str.split(',')[0]) if group_ids_str else None
+            group_name = group_names_str.split(',')[0] if group_names_str else None
+            
+            users.append({
+                "user_id": row["user_id"],
+                "name": row["name"],
+                "username": row["username"],
+                "group_id": group_id,
+                "group_name": group_name,
+                "all_groups": group_names_str  # All groups comma-separated
+            })
+        
         conn.close()
         return users
     except Exception as e:
@@ -1816,6 +1853,11 @@ def approve_registration_request(request_id, reviewer_id):
         
         user_id, name = row
         
+        # Get username from request
+        cursor.execute("SELECT username FROM registration_requests WHERE request_id = ?", (request_id,))
+        username_row = cursor.fetchone()
+        username = username_row[0] if username_row else None
+        
         # Update request status
         cursor.execute('''
             UPDATE registration_requests 
@@ -1823,15 +1865,15 @@ def approve_registration_request(request_id, reviewer_id):
             WHERE request_id = ?
         ''', (reviewer_id, request_id))
         
-        # Create user in users table
+        # Create user in users table with username
         cursor.execute('''
-            INSERT OR IGNORE INTO users (user_id, name, registered)
-            VALUES (?, ?, 1)
-        ''', (user_id, name))
+            INSERT OR IGNORE INTO users (user_id, name, username, registered)
+            VALUES (?, ?, ?, 1)
+        ''', (user_id, name, username))
         
         conn.commit()
         conn.close()
-        logger.info(f"Approved registration request {request_id} for user {user_id}")
+        logger.info(f"Approved registration request {request_id} for user {user_id} (username: {username})")
         return True
     except Exception as e:
         logger.error(f"Error approving registration request: {e}")

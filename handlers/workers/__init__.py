@@ -29,10 +29,10 @@ async def user_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="start_menu")]]
         await query.edit_message_text(
             f"📊 Статистика:\n"
-            f"Ім'я: {user['name']}\n"
-            f"Статус: Активний",
+            f"Имя: {user['name']}\n"
+            f"Статус: Активен",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
     else:
         keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="start_menu")]]
-        await query.edit_message_text("⚠️ Працівника не знайдено.", reply_markup=InlineKeyboardMarkup(keyboard))
+        await query.edit_message_text("⚠️ Работник не найден.", reply_markup=InlineKeyboardMarkup(keyboard))

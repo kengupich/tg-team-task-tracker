@@ -6,12 +6,12 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 # Ukrainian month names
 UKR_MONTHS = [
-    "Січень", "Лютий", "Березень", "Квітень", "Травень", "Червень",
-    "Липень", "Серпень", "Вересень", "Жовтень", "Листопад", "Грудень"
+    "Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
+    "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"
 ]
 
 # Ukrainian day names (short)
-UKR_DAYS_SHORT = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Нд"]
+UKR_DAYS_SHORT = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
 
 # Time options for selection (01:00 to 24:00)
 TIME_OPTIONS = [
@@ -25,10 +25,10 @@ TIME_OPTIONS = [
 def format_task_status(status: str) -> str:
     """Format task status with emoji."""
     status_map = {
-        'pending': '⏳ Очікує',
-        'in_progress': '🔄 В роботі',
+        'pending': '⏳ Ожидает',
+        'in_progress': '🔄 В работе',
         'completed': '✅ Завершено',
-        'cancelled': '❌ Скасовано'
+        'cancelled': '❌ Отменено'
     }
     return status_map.get(status, status)
 

@@ -20,25 +20,25 @@ async def edit_task_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     # Get task info to check permissions
     task = get_task_by_id(task_id)
     if not task:
-        await query.edit_message_text("❌ Завдання не знайдено.")
+        await query.edit_message_text("❌ Задание не найдено.")
         return
     
     # Check permissions
     if not can_edit_task(user_id, task):
-        await query.answer("❌ У вас немає прав для редагування цього завдання", show_alert=True)
+        await query.answer("❌ У вас нет прав для редактирования этого задания", show_alert=True)
         return
     
     # For now, show a message that editing is not yet implemented
-    keyboard = [[InlineKeyboardButton("⬅️ Назад до завдання", callback_data=f"view_task_{task_id}")]]
+    keyboard = [[InlineKeyboardButton("⬅️ Назад к заданию", callback_data=f"view_task_{task_id}")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     await query.edit_message_text(
-        "🚧 Редагування завдань поки що в розробці.\n\n"
-        "Наразі ви можете:\n"
-        "• Переглядати завдання\n"
-        "• Додавати нові завдання\n"
-        "• Видаляти завдання\n\n"
-        "Функція редагування буде додана в наступних оновленнях.",
+        "🚧 Редактирование заданий пока что в разработке.\n\n"
+        "Пока вы можете:\n"
+        "• Просматривать задания\n"
+        "• Добавлять новые задания\n"
+        "• Удалять задания\n\n"
+        "Функция редактирования будет добавлена в следующих обновлениях.",
         reply_markup=reply_markup
     )
 
@@ -54,25 +54,25 @@ async def delete_task_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
     # Get task info to check permissions
     task = get_task_by_id(task_id)
     if not task:
-        await query.edit_message_text("❌ Завдання не знайдено.")
+        await query.edit_message_text("❌ Задание не найдено.")
         return
     
     # Check permissions
     if not can_edit_task(user_id, task):
-        await query.answer("❌ У вас немає прав для видалення цього завдання", show_alert=True)
+        await query.answer("❌ У вас нет прав для удаления этого задания", show_alert=True)
         return
     
     keyboard = [
-        [InlineKeyboardButton("✅ Так, видалити", callback_data=f"delete_task_confirm_{task_id}")],
-        [InlineKeyboardButton("❌ Скасувати", callback_data=f"view_task_{task_id}")],
+        [InlineKeyboardButton("✅ Да, удалить", callback_data=f"delete_task_confirm_{task_id}")],
+        [InlineKeyboardButton("❌ Отменить", callback_data=f"view_task_{task_id}")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     await query.edit_message_text(
-        f"⚠️ Ви впевнені, що хочете видалити завдання?\n\n"
-        f"📋 Завдання #{task_id}\n"
+        f"⚠️ Вы уверены, что хотите удалить задание?\n\n"
+        f"📋 Задание #{task_id}\n"
         f"📝 {task['description'][:50]}...\n\n"
-        f"Це призведе до видалення завдання та всіх його медіа файлів.",
+        f"Это приведет к удалению задания и всех его медиа файлов.",
         reply_markup=reply_markup
     )
 
@@ -88,26 +88,26 @@ async def delete_task_confirm_handler(update: Update, context: ContextTypes.DEFA
     # Get task info to check permissions again (security check)
     task = get_task_by_id(task_id)
     if not task:
-        await query.edit_message_text("❌ Завдання не знайдено.")
+        await query.edit_message_text("❌ Задание не найдено.")
         return
     
     # Check permissions
     if not can_edit_task(user_id, task):
-        await query.answer("❌ У вас немає прав для видалення цього завдання", show_alert=True)
+        await query.answer("❌ У вас нет прав для удаления этого задания", show_alert=True)
         return
     
     # Delete task from database (includes media deletion)
-    keyboard = [[InlineKeyboardButton("⬅️ До списку завдань", callback_data="super_manage_tasks")]]
+    keyboard = [[InlineKeyboardButton("⬅️ К списку заданий", callback_data="super_manage_tasks")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     if delete_task(task_id):
         await query.edit_message_text(
-            f"✅ Завдання #{task_id} успішно видалено.",
+            f"✅ Задание #{task_id} успешно удалено.",
             reply_markup=reply_markup
         )
     else:
         await query.edit_message_text(
-            f"❌ Не вдалось видалити завдання #{task_id}.",
+            f"❌ Не удалось удалить задание #{task_id}.",
             reply_markup=reply_markup
         )
 
@@ -122,15 +122,15 @@ async def change_task_status_handler(update: Update, context: ContextTypes.DEFAU
     # Get current task status
     task = get_task_by_id(task_id)
     if not task:
-        await query.edit_message_text("❌ Завдання не знайдено.")
+        await query.edit_message_text("❌ Задание не найдено.")
         return
     
     current_status = task['status']
     
     # Status options for user - only show statuses different from current
     status_options = [
-        ('pending', '⏳ Очікує'),
-        ('in_progress', '🔄 В роботі'),
+        ('pending', '⏳ Ожидает'),
+        ('in_progress', '🔄 В работе'),
         ('completed', '✅ Завершено')
     ]
     
@@ -147,17 +147,17 @@ async def change_task_status_handler(update: Update, context: ContextTypes.DEFAU
     
     # Get current status text for display
     current_status_text = {
-        'pending': '⏳ Очікує',
-        'in_progress': '🔄 В роботі',
+        'pending': '⏳ Ожидает',
+        'in_progress': '🔄 В работе',
         'completed': '✅ Завершено',
-        'cancelled': '❌ Скасовано'
+        'cancelled': '❌ Отменено'
     }.get(current_status, current_status)
     
     await query.edit_message_text(
-        f"🔄 Оберіть новий статус завдання:\n\n"
-        f"📋 Завдання #{task_id}\n"
+        f"🔄 Выберите новый статус задания:\n\n"
+        f"📋 Задание #{task_id}\n"
         f"📝 {task['description'][:50]}...\n\n"
-        f"Поточний статус: {current_status_text}",
+        f"Текущий статус: {current_status_text}",
         reply_markup=reply_markup
     )
 
@@ -178,7 +178,7 @@ async def set_task_status_handler(update: Update, context: ContextTypes.DEFAULT_
     # Get task info before update for notification
     task = get_task_by_id(task_id)
     if not task:
-        await query.edit_message_text("❌ Завдання не знайдено.")
+        await query.edit_message_text("❌ Задание не найдено.")
         return
     
     old_status = task['status']
@@ -189,8 +189,8 @@ async def set_task_status_handler(update: Update, context: ContextTypes.DEFAULT_
     # Update status
     if update_task_status(task_id, new_status):
         status_text = {
-            'pending': '⏳ Очікує',
-            'in_progress': '🔄 В роботі',
+            'pending': '⏳ Ожидает',
+            'in_progress': '🔄 В работе',
             'completed': '✅ Завершено'
         }.get(new_status, new_status)
         
@@ -199,7 +199,7 @@ async def set_task_status_handler(update: Update, context: ContextTypes.DEFAULT_
         if old_status != new_status and admin_id and admin_id != user_id:
             logger.info(f"Preparing to send notification: old_status={old_status} != new_status={new_status}, admin_id={admin_id} != user_id={user_id}")
             user = get_user_by_id(user_id)
-            user_name = user['name'] if user else 'Невідомий працівник'
+            user_name = user['name'] if user else 'Неизвестный сотрудник'
             task_desc = task['description'].split('\n')[0]  # Get first line
             
             await send_status_change_notification(
@@ -215,12 +215,12 @@ async def set_task_status_handler(update: Update, context: ContextTypes.DEFAULT_
         else:
             logger.info(f"Notification skipped: old_status={old_status}, new_status={new_status}, admin_id={admin_id}, user_id={user_id}")
         
-        keyboard = [[InlineKeyboardButton("⬅️ До завдання", callback_data=f"view_task_{task_id}")]]
+        keyboard = [[InlineKeyboardButton("⬅️ К заданию", callback_data=f"view_task_{task_id}")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
-        confirmation_message = f"✅ Статус завдання #{task_id} змінено на: {status_text}"
+        confirmation_message = f"✅ Статус задания #{task_id} изменен на: {status_text}"
         if notification_sent:
-            confirmation_message += "\n\n📧 Постановника сповіщено"
+            confirmation_message += "\n\n📧 Постановщик уведомлен"
         
         await query.edit_message_text(
             confirmation_message,
@@ -231,6 +231,6 @@ async def set_task_status_handler(update: Update, context: ContextTypes.DEFAULT_
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         await query.edit_message_text(
-            "❌ Не вдалось змінити статус.",
+            "❌ Не удалось изменить статус.",
             reply_markup=reply_markup
         )

@@ -21,13 +21,13 @@ async def send_task_assignment_notification(
     """Send notification to user about new task assignment."""
     try:
         message = (
-            f"📋 Нове завдання!\n\n"
-            f"Вам призначено нове завдання:\n\n"
+            f"📋 Новое задание!\n\n"
+            f"Вам назначено новое задание:\n\n"
             f"📝 {task_description}\n\n"
-            f"📅 Дедлайн: {deadline} о {time}\n\n"
-            f"Перегляньте деталі в меню 'Мої завдання'."
+            f"📅 Дедлайн: {deadline} в {time}\n\n"
+            f"Просмотрите детали в меню 'Мои задания'."
         )
-        keyboard = [[InlineKeyboardButton("📋 Переглянути завдання", callback_data=f"view_task_{task_id}")]]
+        keyboard = [[InlineKeyboardButton("📋 Просмотреть задание", callback_data=f"view_task_{task_id}")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await context.bot.send_message(chat_id=user_id, text=message, reply_markup=reply_markup)
     except Exception as e:
@@ -51,12 +51,12 @@ async def send_status_change_notification(
         new_status_text = format_task_status(new_status)
         
         message = (
-            f"🔔 Оновлення статусу завдання\n\n"
-            f"📝 Завдання: {task_description[:50]}...\n\n"
-            f"Статус змінено з {old_status_text} на {new_status_text}\n\n"
-            f"👤 Змінив: {changed_by_name}"
+            f"🔔 Обновление статуса задания\n\n"
+            f"📝 Задание: {task_description[:50]}...\n\n"
+            f"Статус изменен с {old_status_text} на {new_status_text}\n\n"
+            f"👤 Изменил: {changed_by_name}"
         )
-        keyboard = [[InlineKeyboardButton("📋 Переглянути завдання", callback_data=f"view_task_{task_id}")]]
+        keyboard = [[InlineKeyboardButton("📋 Просмотреть задание", callback_data=f"view_task_{task_id}")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await context.bot.send_message(chat_id=admin_id, text=message, reply_markup=reply_markup)
         logger.info(f"Status change notification sent successfully to admin {admin_id}")
@@ -99,14 +99,14 @@ async def send_deadline_reminder(context: ContextTypes.DEFAULT_TYPE) -> None:
                         status_text = format_task_status(task['status'])
                         
                         message = (
-                            f"🚨 ПРОТЕРМІНОВАНИЙ ДЕДЛАЙН!\n\n"
-                            f"📋 Завдання: {task['description'][:100]}...\n\n"
-                            f"📅 Дедлайн був: {task['date']} о {task['time']}\n"
-                            f"⏰ Прострочено на: {int(hours_overdue)} год.\n"
+                            f"🚨 ПРОСРОЧЕННЫЙ ДЕДЛАЙН!\n\n"
+                            f"📋 Задание: {task['description'][:100]}...\n\n"
+                            f"📅 Дедлайн был: {task['date']} в {task['time']}\n"
+                            f"⏰ Просрочено на: {int(hours_overdue)} час.\n"
                             f"📊 Статус: {status_text}\n\n"
-                            f"Завдання потребує уваги!"
+                            f"Задание требует внимания!"
                         )
-                        keyboard = [[InlineKeyboardButton("📋 Переглянути завдання", callback_data=f"view_task_{task['task_id']}")]]
+                        keyboard = [[InlineKeyboardButton("📋 Просмотреть задание", callback_data=f"view_task_{task['task_id']}")]]
                         reply_markup = InlineKeyboardMarkup(keyboard)
                         
                         # Send to assigned users (виконавці)
