@@ -11,6 +11,12 @@ import warnings
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
+# Load environment variables first
+load_dotenv()
+
+# Import config module for environment settings
+from config import Config
+
 # Suppress PTBUserWarning about per_message settings (we intentionally mix handler types)
 warnings.filterwarnings("ignore", message=".*per_message.*")
 
@@ -65,20 +71,24 @@ from handlers.tasks import (
     # Creation + states
     create_task, task_title_input, task_calendar_navigation, task_date_selected,
     task_time_selected, task_time_manual_input, task_description_input,
-    task_add_media, task_handle_media_file, task_done_media, task_skip_media,
     task_toggle_user, task_confirm_users,
     task_skip_description, task_forward_to_date, task_forward_to_time,
-    task_forward_to_description, task_forward_to_media, task_forward_to_users,
+    task_forward_to_description, task_forward_to_users,
     task_back_to_title, task_back_to_date, task_back_to_time, task_back_to_description,
-    task_back_to_media,
     cancel_task_creation,
     TASK_STEP_TITLE, TASK_STEP_DATE, TASK_STEP_TIME, TASK_STEP_DESCRIPTION,
-    TASK_STEP_MEDIA, TASK_STEP_USERS,
+    TASK_STEP_USERS,
     # Viewing
     view_task_detail, view_task_media,
     # Editing
-    edit_task_handler, delete_task_handler, delete_task_confirm_handler,
+    edit_task_handler, edit_task_field_handler, edit_title_input, edit_description_input,
+    show_status_edit_menu, edit_status_select, show_media_edit_menu, edit_media_delete,
+    delete_media_file, edit_media_add, handle_edit_media_file,
+    show_users_edit_menu, edit_toggle_user, edit_users_done, back_to_edit_menu, save_task_changes,
+    delete_task_handler, delete_task_confirm_handler,
     change_task_status_handler, set_task_status_handler,
+    EDIT_TASK_MENU, EDIT_TASK_TITLE, EDIT_TASK_DESCRIPTION, EDIT_TASK_MEDIA,
+    EDIT_TASK_STATUS, EDIT_TASK_USERS,
 )
 
 # Import group_admin and worker handlers
@@ -92,12 +102,11 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Load environment variables
-load_dotenv()
-TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+# Use config for settings
+TOKEN = Config.TELEGRAM_BOT_TOKEN
 # Parse super admin IDs from comma-separated string
 SUPER_ADMIN_IDS = [
-    int(id.strip()) for id in os.getenv("SUPER_ADMIN_ID", "0").split(",") if id.strip()
+    int(id.strip()) for id in Config.SUPER_ADMIN_ID.split(",") if id.strip()
 ]
 
 # Conversation states (only those NOT imported from handlers)
@@ -251,12 +260,11 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             await view_task_detail(update, context)
         
         # Task editing/deletion handlers
+        # Note: edit_task_ is handled by ConversationHandler
         elif data.startswith("delete_task_confirm_"):
             await delete_task_confirm_handler(update, context)
         elif data.startswith("delete_task_"):
             await delete_task_handler(update, context)
-        elif data.startswith("edit_task_"):
-            await edit_task_handler(update, context)
         
         # Task status change handlers
         elif data.startswith("set_task_status_"):
@@ -304,7 +312,7 @@ def start_bot():
             TASK_STEP_DATE: [
                 CallbackQueryHandler(task_calendar_navigation, pattern="^cal_(prev|next)_.*"),
                 CallbackQueryHandler(task_date_selected, pattern="^cal_select_.*"),
-                CallbackQueryHandler(task_back_to_media, pattern="^task_back_to_media$"),
+                CallbackQueryHandler(task_back_to_description, pattern="^task_back_to_description$"),
                 CallbackQueryHandler(task_forward_to_time, pattern="^task_forward_to_time$"),
                 CallbackQueryHandler(cancel_task_creation, pattern="^cancel_task_creation$"),
                 CallbackQueryHandler(lambda u, c: u.callback_query.answer(), pattern="^cal_ignore$"),
@@ -321,17 +329,8 @@ def start_bot():
                 MessageHandler(filters.TEXT & ~filters.COMMAND, task_description_input),
                 CallbackQueryHandler(task_skip_description, pattern="^task_skip_description$"),
                 CallbackQueryHandler(task_back_to_title, pattern="^task_back_to_title$"),
-                CallbackQueryHandler(task_forward_to_media, pattern="^task_forward_to_media$"),
-                CallbackQueryHandler(cancel_task_creation, pattern="^cancel_task_creation$"),
-            ],
-            TASK_STEP_MEDIA: [
-                CallbackQueryHandler(task_add_media, pattern="^task_add_media$"),
-                CallbackQueryHandler(task_skip_media, pattern="^task_skip_media$"),
-                CallbackQueryHandler(task_back_to_description, pattern="^task_back_to_description$"),
                 CallbackQueryHandler(task_forward_to_date, pattern="^task_forward_to_date$"),
                 CallbackQueryHandler(cancel_task_creation, pattern="^cancel_task_creation$"),
-                MessageHandler(filters.PHOTO | filters.VIDEO | filters.Document.ALL, task_handle_media_file),
-                CommandHandler("done_media", task_done_media),
             ],
             TASK_STEP_USERS: [
                 CallbackQueryHandler(task_toggle_user, pattern="^task_toggle_user_.*"),
@@ -428,6 +427,45 @@ def start_bot():
         fallbacks=[CommandHandler("cancel", cancel)],
     )
     application.add_handler(super_user_set_name_conv)
+
+    # Task editing conversation
+    edit_task_conv_handler = ConversationHandler(
+        entry_points=[CallbackQueryHandler(edit_task_handler, pattern="^edit_task_.*")],
+        per_message=False,
+        states={
+            EDIT_TASK_MENU: [
+                CallbackQueryHandler(edit_task_field_handler, pattern="^edit_task_field_.*"),
+                CallbackQueryHandler(save_task_changes, pattern="^save_task_changes_.*"),
+                CallbackQueryHandler(back_to_edit_menu, pattern="^back_to_edit_menu_.*"),
+            ],
+            EDIT_TASK_TITLE: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, edit_title_input),
+                CallbackQueryHandler(back_to_edit_menu, pattern="^back_to_edit_menu_.*"),
+            ],
+            EDIT_TASK_DESCRIPTION: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, edit_description_input),
+                CallbackQueryHandler(back_to_edit_menu, pattern="^back_to_edit_menu_.*"),
+            ],
+            EDIT_TASK_STATUS: [
+                CallbackQueryHandler(edit_status_select, pattern="^edit_status_select_.*"),
+                CallbackQueryHandler(back_to_edit_menu, pattern="^back_to_edit_menu_.*"),
+            ],
+            EDIT_TASK_MEDIA: [
+                CallbackQueryHandler(edit_media_delete, pattern="^edit_media_delete_.*"),
+                CallbackQueryHandler(delete_media_file, pattern="^delete_media_file_.*"),
+                CallbackQueryHandler(edit_media_add, pattern="^edit_media_add_.*"),
+                MessageHandler(filters.PHOTO | filters.VIDEO, handle_edit_media_file),
+                CallbackQueryHandler(back_to_edit_menu, pattern="^back_to_edit_menu_.*"),
+            ],
+            EDIT_TASK_USERS: [
+                CallbackQueryHandler(edit_toggle_user, pattern="^edit_toggle_user_.*"),
+                CallbackQueryHandler(edit_users_done, pattern="^edit_users_done_.*"),
+                CallbackQueryHandler(back_to_edit_menu, pattern="^back_to_edit_menu_.*"),
+            ],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+    )
+    application.add_handler(edit_task_conv_handler)
     
     # Callback query handler for buttons
     application.add_handler(CallbackQueryHandler(button_callback))
@@ -436,16 +474,88 @@ def start_bot():
     job_queue = application.job_queue
     job_queue.run_repeating(send_deadline_reminder, interval=1800, first=10)  # 1800 seconds = 30 minutes
     
-    # Start polling
-    print("[BOT] Bot started. Press Ctrl+C to stop.")
-    print("[BOT] Deadline reminder job scheduled (checks every 30 minutes)")
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
+    # Start in debug or production mode
+    config_info = Config.get_info()
+    logger.info(f"Bot configuration: {config_info}")
+    
+    if Config.DEBUG:
+        # Debug mode: use polling for local development
+        logger.info("[BOT] Running in DEBUG mode (polling)")
+        print("[BOT] Bot started in DEBUG mode. Press Ctrl+C to stop.")
+        print("[BOT] Deadline reminder job scheduled (checks every 30 minutes)")
+        application.run_polling(allowed_updates=Update.ALL_TYPES, timeout=Config.POLLING_TIMEOUT)
+    else:
+        # Production mode: use webhook for Railway
+        logger.info(f"[BOT] Running in PRODUCTION mode (webhook)")
+        print(f"[BOT] Bot started in PRODUCTION mode")
+        print(f"[BOT] Webhook URL: {Config.RAILWAY_URL}")
+        print(f"[BOT] Listening on 0.0.0.0:{Config.PORT}")
+        
+        # Set webhook and start server
+        try:
+            import asyncio
+            asyncio.run(setup_webhook(application))
+        except Exception as e:
+            logger.error(f"Failed to setup webhook: {e}")
+            logger.info("Falling back to polling mode")
+            application.run_polling(allowed_updates=Update.ALL_TYPES, timeout=Config.POLLING_TIMEOUT)
+    
     return application
+
+
+async def setup_webhook(application):
+    """Setup webhook for production mode."""
+    async with application:
+        webhook_url = f"{Config.RAILWAY_URL}/{TOKEN}"
+        logger.info(f"Setting webhook URL: {webhook_url}")
+        
+        await application.bot.set_webhook(url=webhook_url)
+        logger.info("Webhook set successfully")
+        
+        # Start Flask app for webhook
+        run_webhook_server(application)
+
+
+def run_webhook_server(application):
+    """Run Flask webhook server."""
+    try:
+        from flask import Flask, request
+        
+        app = Flask(__name__)
+        
+        @app.route('/', methods=['GET'])
+        def health_check():
+            """Health check endpoint."""
+            return 'Bot is running', 200
+        
+        @app.route(f'/{TOKEN}', methods=['POST'])
+        def webhook_handler():
+            """Handle Telegram webhook updates."""
+            import asyncio
+            
+            data = request.get_json()
+            update = Update.de_json(data, application.bot)
+            
+            asyncio.run(application.process_update(update))
+            return 'OK', 200
+        
+        logger.info(f"Starting Flask webhook server on 0.0.0.0:{Config.PORT}")
+        app.run(host='0.0.0.0', port=Config.PORT, debug=False)
+        
+    except ImportError:
+        logger.error("Flask not installed. Install it with: pip install flask")
+        raise
 
 
 def main():
     """Main entry point."""
-    start_bot()
+    try:
+        start_bot()
+    except KeyboardInterrupt:
+        logger.info("Bot stopped by user")
+    except Exception as e:
+        logger.error(f"Fatal error: {e}", exc_info=True)
+        raise
 
 
 if __name__ == "__main__":

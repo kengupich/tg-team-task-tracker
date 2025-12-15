@@ -9,6 +9,7 @@ from database import (
     get_admin_groups, get_user_by_id, get_group_users
 )
 from utils.permissions import is_super_admin, is_group_admin
+from utils.helpers import get_status_emoji, format_task_status
 
 logger = logging.getLogger(__name__)
 
@@ -73,14 +74,9 @@ async def filter_tasks_created(update: Update, context: ContextTypes.DEFAULT_TYP
     
     keyboard = []
     for task in tasks[:20]:
-        status_emoji = {
-            'pending': '⏳',
-            'in_progress': '🔄',
-            'completed': '✅',
-            'cancelled': '❌'
-        }.get(task['status'], '📌')
+        status_emoji = get_status_emoji(task['status'])
         
-        desc = task['description'][:40] + '...' if len(task['description']) > 40 else task['description']
+        desc = (task.get('title') or task['description'])[:40] + '...' if len(task.get('title') or task['description']) > 40 else (task.get('title') or task['description'])
         keyboard.append([
             InlineKeyboardButton(
                 f"{status_emoji} {desc} ({task['date']})",
@@ -113,14 +109,9 @@ async def filter_tasks_assigned(update: Update, context: ContextTypes.DEFAULT_TY
     
     keyboard = []
     for task in tasks[:20]:
-        status_emoji = {
-            'pending': '⏳',
-            'in_progress': '🔄',
-            'completed': '✅',
-            'cancelled': '❌'
-        }.get(task['status'], '📌')
+        status_emoji = get_status_emoji(task['status'])
         
-        desc = task['description'][:40] + '...' if len(task['description']) > 40 else task['description']
+        desc = (task.get('title') or task['description'])[:40] + '...' if len(task.get('title') or task['description']) > 40 else (task.get('title') or task['description'])
         keyboard.append([
             InlineKeyboardButton(
                 f"{status_emoji} {desc} ({task['date']})",
@@ -178,7 +169,15 @@ async def filter_tasks_group(update: Update, context: ContextTypes.DEFAULT_TYPE)
     query = update.callback_query
     await query.answer()
     
-    group_id = int(query.data.split("_")[-1])
+    # Try to get group_id from callback data, or from context if called from admin_view_tasks
+    try:
+        group_id = int(query.data.split("_")[-1])
+    except (ValueError, IndexError):
+        # Fallback to temp_group_id if available (called from admin_view_tasks)
+        group_id = context.user_data.get('temp_group_id')
+        if not group_id:
+            await query.edit_message_text("❌ Помилка: група не визначена.")
+            return
     
     group = get_group(group_id)
     group_name = group['name'] if group else "Неизвестно"
@@ -251,14 +250,9 @@ async def filter_group_all_tasks(update: Update, context: ContextTypes.DEFAULT_T
     
     keyboard = []
     for task in tasks[:20]:
-        status_emoji = {
-            'pending': '⏳',
-            'in_progress': '🔄',
-            'completed': '✅',
-            'cancelled': '❌'
-        }.get(task['status'], '📌')
+        status_emoji = get_status_emoji(task['status'])
         
-        desc = task['description'][:40] + '...' if len(task['description']) > 40 else task['description']
+        desc = (task.get('title') or task['description'])[:40] + '...' if len(task.get('title') or task['description']) > 40 else (task.get('title') or task['description'])
         keyboard.append([
             InlineKeyboardButton(
                 f"{status_emoji} {desc} ({task['date']})",
@@ -305,14 +299,9 @@ async def filter_tasks_by_assignee(update: Update, context: ContextTypes.DEFAULT
     
     keyboard = []
     for task in tasks[:20]:
-        status_emoji = {
-            'pending': '⏳',
-            'in_progress': '🔄',
-            'completed': '✅',
-            'cancelled': '❌'
-        }.get(task['status'], '📌')
+        status_emoji = get_status_emoji(task['status'])
         
-        desc = task['description'][:40] + '...' if len(task['description']) > 40 else task['description']
+        desc = (task.get('title') or task['description'])[:40] + '...' if len(task.get('title') or task['description']) > 40 else (task.get('title') or task['description'])
         keyboard.append([
             InlineKeyboardButton(
                 f"{status_emoji} {desc} ({task['date']})",
@@ -370,14 +359,9 @@ async def filter_tasks_all(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     
     keyboard = []
     for task in tasks[:20]:
-        status_emoji = {
-            'pending': '⏳',
-            'in_progress': '🔄',
-            'completed': '✅',
-            'cancelled': '❌'
-        }.get(task['status'], '📌')
+        status_emoji = get_status_emoji(task['status'])
         
-        desc = task['description'][:40] + '...' if len(task['description']) > 40 else task['description']
+        desc = (task.get('title') or task['description'])[:40] + '...' if len(task.get('title') or task['description']) > 40 else (task.get('title') or task['description'])
         keyboard.append([
             InlineKeyboardButton(
                 f"{status_emoji} {desc} ({task['date']})",
@@ -446,7 +430,7 @@ async def filter_archived_created(update: Update, context: ContextTypes.DEFAULT_
     
     keyboard = []
     for task in page_tasks:
-        desc = task['description'][:40] + '...' if len(task['description']) > 40 else task['description']
+        desc = (task.get('title') or task['description'])[:40] + '...' if len(task.get('title') or task['description']) > 40 else (task.get('title') or task['description'])
         keyboard.append([
             InlineKeyboardButton(
                 f"✅ {desc} ({task['date']})",
@@ -509,7 +493,7 @@ async def filter_archived_assigned(update: Update, context: ContextTypes.DEFAULT
     
     keyboard = []
     for task in page_tasks:
-        desc = task['description'][:40] + '...' if len(task['description']) > 40 else task['description']
+        desc = (task.get('title') or task['description'])[:40] + '...' if len(task.get('title') or task['description']) > 40 else (task.get('title') or task['description'])
         keyboard.append([
             InlineKeyboardButton(
                 f"✅ {desc} ({task['date']})",

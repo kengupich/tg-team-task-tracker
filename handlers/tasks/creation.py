@@ -19,10 +19,10 @@ logger = logging.getLogger(__name__)
 # Conversation states  
 TASK_STEP_TITLE = 0
 TASK_STEP_DESCRIPTION = 1
-TASK_STEP_MEDIA = 2
-TASK_STEP_DATE = 3
-TASK_STEP_TIME = 4
-TASK_STEP_USERS = 5
+# TASK_STEP_MEDIA = 2  # COMMENTED OUT - Media now added with description
+TASK_STEP_DATE = 2  # Was 3
+TASK_STEP_TIME = 3  # Was 4
+TASK_STEP_USERS = 4  # Was 5
 
 
 async def show_title_step(update: Update, context: ContextTypes.DEFAULT_TYPE, is_query: bool = True) -> None:
@@ -42,7 +42,7 @@ async def show_title_step(update: Update, context: ContextTypes.DEFAULT_TYPE, is
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     current_title = task_data.get("title", "")
-    text = f"📝 Шаг 1/6: Введите название задания:\n\n"
+    text = f"📝 Шаг 1/5: Введите название задания:\n\n"
     if current_title:
         text += f"Текущее название: {current_title}"
     
@@ -53,14 +53,14 @@ async def show_title_step(update: Update, context: ContextTypes.DEFAULT_TYPE, is
 
 
 async def create_task(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Start task creation process - available for all registered users."""
+    """Start task creation process - available for all registered users and super admins."""
     query = update.callback_query
     await query.answer()
     
     user_id = query.from_user.id
     
-    # Check if user is registered
-    if not user_exists(user_id):
+    # Check if user is registered or is a super admin
+    if not user_exists(user_id) and not is_super_admin(user_id):
         await query.edit_message_text("⚠️ Вы не зарегистрированы в системе.")
         return ConversationHandler.END
     
@@ -93,9 +93,9 @@ async def show_description_step(update: Update, context: ContextTypes.DEFAULT_TY
     
     nav_buttons = [InlineKeyboardButton("⬅️ Назад", callback_data="task_back_to_title")]
     
-    # Show Forward button if user visited step 3 (media_visited)
-    if task_data.get("media_visited"):
-        nav_buttons.append(InlineKeyboardButton("➡️ Вперед", callback_data="task_forward_to_media"))
+    # Show Forward button if user visited step 3 (date_visited)
+    if task_data.get("date_visited"):
+        nav_buttons.append(InlineKeyboardButton("➡️ Вперед", callback_data="task_forward_to_date"))
     else: 
         nav_buttons.append(InlineKeyboardButton("⏭️ Пропустить", callback_data="task_skip_description"))
     
@@ -106,7 +106,7 @@ async def show_description_step(update: Update, context: ContextTypes.DEFAULT_TY
     
     title = task_data.get("title", "")
     text = f"✅ Название: {title}\n\n" \
-           f"📝 Шаг 2/6: Введите описание задания (опционально).\n\n" \
+           f"📝 Шаг 2/5: Введите описание задания (опционально).\n\n" \
            f"📷 Можете прикрепить фото к сообщению с описанием."
     
     if is_query:
@@ -122,47 +122,48 @@ async def task_title_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     return TASK_STEP_DESCRIPTION
 
 
-async def show_media_step(update: Update, context: ContextTypes.DEFAULT_TYPE, is_query: bool = True) -> None:
-    """Display step 3: media input with navigation buttons."""
-    task_data = context.user_data["task_data"]
-    task_data["media_visited"] = True
-    
-    # Build keyboard with navigation
-    keyboard = [[InlineKeyboardButton("📸 Добавить фото/видео", callback_data="task_add_media")]]
-    
-    nav_buttons = [InlineKeyboardButton("⬅️ Назад", callback_data="task_back_to_description")]
-    
-    # Show Forward if user visited step 4 (date_visited)
-    if task_data.get("date_visited"):
-        nav_buttons.append(InlineKeyboardButton("➡️ Вперед", callback_data="task_forward_to_date"))
-    else:
-        nav_buttons.append(InlineKeyboardButton("⏭️ Пропустить", callback_data="task_skip_media"))
-    
-    nav_buttons.append(InlineKeyboardButton("❌ Отменить", callback_data="cancel_task_creation"))
-    keyboard.append(nav_buttons)
-    
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    media_count = len(task_data.get("media_files", []))
-    desc_display = task_data.get("description", "")
-    
-    if desc_display:
-        if len(desc_display) > 100:
-            status = f"✅ Описание: {desc_display[:100]}..."
-        else:
-            status = "✅ Описание сохранено"
-    else:
-        status = "⏭️ Описание пропущено"
-    
-    if media_count > 0:
-        status = f"📸 Загружено {media_count} файл(ов)"
-    
-    text = f"{status}\n\n🖼️ Шаг 3/6: Добавьте медиа (фото/видео) или пропустите:"
-    
-    if is_query:
-        await update.callback_query.edit_message_text(text, reply_markup=reply_markup)
-    else:
-        await update.message.reply_text(text, reply_markup=reply_markup)
+# COMMENTED OUT - Media step removed from flow, media now added with description
+# async def show_media_step(update: Update, context: ContextTypes.DEFAULT_TYPE, is_query: bool = True) -> None:
+#     """Display step 3: media input with navigation buttons."""
+#     task_data = context.user_data["task_data"]
+#     task_data["media_visited"] = True
+#     
+#     # Build keyboard with navigation
+#     keyboard = [[InlineKeyboardButton("📸 Добавить фото/видео", callback_data="task_add_media")]]
+#     
+#     nav_buttons = [InlineKeyboardButton("⬅️ Назад", callback_data="task_back_to_description")]
+#     
+#     # Show Forward if user visited step 4 (date_visited)
+#     if task_data.get("date_visited"):
+#         nav_buttons.append(InlineKeyboardButton("➡️ Вперед", callback_data="task_forward_to_date"))
+#     else:
+#         nav_buttons.append(InlineKeyboardButton("⏭️ Пропустить", callback_data="task_skip_media"))
+#     
+#     nav_buttons.append(InlineKeyboardButton("❌ Отменить", callback_data="cancel_task_creation"))
+#     keyboard.append(nav_buttons)
+#     
+#     reply_markup = InlineKeyboardMarkup(keyboard)
+#     
+#     media_count = len(task_data.get("media_files", []))
+#     desc_display = task_data.get("description", "")
+#     
+#     if desc_display:
+#         if len(desc_display) > 100:
+#             status = f"✅ Описание: {desc_display[:100]}..."
+#         else:
+#             status = "✅ Описание сохранено"
+#     else:
+#         status = "⏭️ Описание пропущено"
+#     
+#     if media_count > 0:
+#         status = f"📸 Загружено {media_count} файл(ов)"
+#     
+#     text = f"{status}\n\n🖼️ Шаг 3/6: Добавьте медиа (фото/видео) или пропустите:"
+#     
+#     if is_query:
+#         await update.callback_query.edit_message_text(text, reply_markup=reply_markup)
+#     else:
+#         await update.message.reply_text(text, reply_markup=reply_markup)
 
 
 async def show_date_step(update: Update, context: ContextTypes.DEFAULT_TYPE, is_query: bool = True, year: int = None, month: int = None) -> None:
@@ -179,9 +180,9 @@ async def show_date_step(update: Update, context: ContextTypes.DEFAULT_TYPE, is_
     calendar_keyboard = generate_calendar(year, month)
     
     # Add navigation buttons
-    nav_buttons = [InlineKeyboardButton("⬅️ Назад", callback_data="task_back_to_media")]
+    nav_buttons = [InlineKeyboardButton("⬅️ Назад", callback_data="task_back_to_description")]
     
-    # Show Forward if user visited step 5 (time_visited)
+    # Show Forward if user visited step 4 (time_visited)
     if task_data.get("time_visited"):
         nav_buttons.append(InlineKeyboardButton("➡️ Вперед", callback_data="task_forward_to_time"))
     
@@ -189,7 +190,7 @@ async def show_date_step(update: Update, context: ContextTypes.DEFAULT_TYPE, is_
     calendar_keyboard.append(nav_buttons)
     
     reply_markup = InlineKeyboardMarkup(calendar_keyboard)
-    text = "📆 Шаг 4/6: Выберите дату дедлайна:"
+    text = "📆 Шаг 3/5: Выберите дату дедлайна:"
     
     if is_query:
         await update.callback_query.edit_message_text(text, reply_markup=reply_markup)
@@ -213,7 +214,7 @@ async def show_time_step(update: Update, context: ContextTypes.DEFAULT_TYPE, is_
     # Add navigation buttons
     nav_buttons = [InlineKeyboardButton("⬅️ Назад", callback_data="task_back_to_date")]
     
-    # Show Forward if user visited step 6 (users_visited)
+    # Show Forward if user visited step 5 (users_visited)
     if task_data.get("users_visited"):
         nav_buttons.append(InlineKeyboardButton("➡️ Вперед", callback_data="task_forward_to_users"))
     
@@ -229,7 +230,7 @@ async def show_time_step(update: Update, context: ContextTypes.DEFAULT_TYPE, is_
         year, month, day = selected_date.split("-")
         date_display = f"📅 Выбрано: {day} {UKR_MONTHS[int(month)-1]} {year}\n\n"
     
-    text = f"{date_display}🕒 Шаг 5/6: Выберите время дедлайна\n\n" \
+    text = f"{date_display}🕒 Шаг 4/5: Выберите время дедлайна\n\n" \
            f"Или укажите время вручную в формате 00:00"
     
     if is_query:
@@ -239,7 +240,7 @@ async def show_time_step(update: Update, context: ContextTypes.DEFAULT_TYPE, is_
 
 
 async def show_users_step(update: Update, context: ContextTypes.DEFAULT_TYPE, is_query: bool = True) -> None:
-    """Display step 6: user selection with navigation buttons."""
+    """Display step 5: user selection with navigation buttons."""
     task_data = context.user_data["task_data"]
     task_data["users_visited"] = True
     
@@ -418,9 +419,7 @@ async def task_description_input(update: Update, context: ContextTypes.DEFAULT_T
     if desc_text.strip():
         context.user_data["task_data"]["description"] = desc_text.strip()
     
-    context.user_data["task_data"]["media_visited"] = True
-    
-    # If photo attached, save it and move to media step automatically
+    # If photo attached, save it
     if has_photo:
         file_id = update.message.photo[-1].file_id
         media_files = context.user_data["task_data"].get("media_files", [])
@@ -431,115 +430,113 @@ async def task_description_input(update: Update, context: ContextTypes.DEFAULT_T
             "file_size": update.message.photo[-1].file_size
         })
         context.user_data["task_data"]["media_files"] = media_files
-        context.user_data["task_data"]["media_visited"] = True
-        context.user_data["task_data"]["waiting_for_media"] = True
         
         await update.message.reply_text(
-            f"✅ Описание и фото сохранены!\n\n"
-            f"📸 Шаг 3/6: Добавьте еще фото/видео (до 20 файлов).\n\n"
-            f"Когда закончите, отправьте /done_media"
+            f"✅ Описание и фото сохранены! Переходим к выбору даты..."
         )
-        return TASK_STEP_MEDIA
     
-    # No photo - show media options
-    await show_media_step(update, context, is_query=False)
-    return TASK_STEP_MEDIA
-
-
-async def task_add_media(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle media upload."""
-    query = update.callback_query
-    await query.answer()
-    
-    context.user_data["task_data"]["waiting_for_media"] = True
-    # Don't reset media_files if they already exist (from description with photo)
-    if "media_files" not in context.user_data["task_data"]:
-        context.user_data["task_data"]["media_files"] = []
-    
-    await query.edit_message_text(
-        "📸 Отправьте фото или видео (до 20 файлов).\n\n"
-        "Когда закончите, отправьте /done_media, чтобы перейти к выбору даты."
-    )
-    return TASK_STEP_MEDIA
-
-
-async def task_handle_media_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle incoming media files."""
-    if "task_data" not in context.user_data or not context.user_data["task_data"].get("waiting_for_media"):
-        return TASK_STEP_MEDIA
-    
-    media_files = context.user_data["task_data"].get("media_files", [])
-    
-    # Check if we've reached 20 files limit
-    if len(media_files) >= 20:
-        await update.message.reply_text("❌ Достигнут максимум 20 файлов. Отправьте /done_media, чтобы продолжить.")
-        return TASK_STEP_MEDIA
-    
-    # Handle photo
-    if update.message.photo:
-        file_id = update.message.photo[-1].file_id  # Get the largest photo
-        media_files.append({
-            "file_id": file_id,
-            "file_type": "photo",
-            "file_name": f"photo_{len(media_files)+1}.jpg",
-            "file_size": update.message.photo[-1].file_size
-        })
-        await update.message.reply_text(f"✅ Фото добавлено ({len(media_files)}/20)")
-    
-    # Handle video
-    elif update.message.video:
-        file_id = update.message.video.file_id
-        media_files.append({
-            "file_id": file_id,
-            "file_type": "video",
-            "file_name": update.message.video.file_name or f"video_{len(media_files)+1}.mp4",
-            "file_size": update.message.video.file_size
-        })
-        await update.message.reply_text(f"✅ Видео добавлено ({len(media_files)}/20)")
-    
-    # Handle document (like video)
-    elif update.message.document:
-        if update.message.document.mime_type and update.message.document.mime_type.startswith("video"):
-            file_id = update.message.document.file_id
-            media_files.append({
-                "file_id": file_id,
-                "file_type": "video",
-                "file_name": update.message.document.file_name or f"video_{len(media_files)+1}.mp4",
-                "file_size": update.message.document.file_size
-            })
-            await update.message.reply_text(f"✅ Видео добавлено ({len(media_files)}/20)")
-        else:
-            await update.message.reply_text("❌ Поддерживаются только фото и видео.")
-    
-    else:
-        await update.message.reply_text("❌ Пожалуйста, отправьте фото или видео.")
-    
-    context.user_data["task_data"]["media_files"] = media_files
-    return TASK_STEP_MEDIA
-
-
-async def task_done_media(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Finish media upload and proceed to date selection."""
-    if "task_data" not in context.user_data:
-        await update.message.reply_text("❌ Нет активного задания.")
-        return ConversationHandler.END
-    
-    media_count = len(context.user_data["task_data"].get("media_files", []))
-    await update.message.reply_text(f"✅ Загружено {media_count} файл(ов). Переходим к выбору даты...")
-    
-    context.user_data["task_data"]["waiting_for_media"] = False
+    # Go directly to date selection
     await show_date_step(update, context, is_query=False)
     return TASK_STEP_DATE
 
 
-async def task_skip_media(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Skip media and proceed to date selection."""
-    query = update.callback_query
-    await query.answer()
-    
-    context.user_data["task_data"]["waiting_for_media"] = False
-    await show_date_step(update, context, is_query=True)
-    return TASK_STEP_DATE
+# COMMENTED OUT - Media step removed, but functionality preserved for future use
+# async def task_add_media(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+#     """Handle media upload."""
+#     query = update.callback_query
+#     await query.answer()
+#     
+#     context.user_data["task_data"]["waiting_for_media"] = True
+#     # Don't reset media_files if they already exist (from description with photo)
+#     if "media_files" not in context.user_data["task_data"]:
+#         context.user_data["task_data"]["media_files"] = []
+#     
+#     await query.edit_message_text(
+#         "📸 Отправьте фото или видео (до 20 файлов).\n\n"
+#         "Когда закончите, отправьте /done_media, чтобы перейти к выбору даты."
+#     )
+#     return TASK_STEP_MEDIA
+
+
+# COMMENTED OUT - Media step removed, but functionality preserved for future use
+# async def task_handle_media_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+#     """Handle incoming media files."""
+#     if "task_data" not in context.user_data or not context.user_data["task_data"].get("waiting_for_media"):
+#         return TASK_STEP_MEDIA
+#     
+#     media_files = context.user_data["task_data"].get("media_files", [])
+#     
+#     # Check if we've reached 20 files limit
+#     if len(media_files) >= 20:
+#         await update.message.reply_text("❌ Достигнут максимум 20 файлов. Отправьте /done_media, чтобы продолжить.")
+#         return TASK_STEP_MEDIA
+#     
+#     # Handle photo
+#     if update.message.photo:
+#         file_id = update.message.photo[-1].file_id  # Get the largest photo
+#         media_files.append({
+#             "file_id": file_id,
+#             "file_type": "photo",
+#             "file_name": f"photo_{len(media_files)+1}.jpg",
+#             "file_size": update.message.photo[-1].file_size
+#         })
+#         await update.message.reply_text(f"✅ Фото добавлено ({len(media_files)}/20)")
+#     
+#     # Handle video
+#     elif update.message.video:
+#         file_id = update.message.video.file_id
+#         media_files.append({
+#             "file_id": file_id,
+#             "file_type": "video",
+#             "file_name": update.message.video.file_name or f"video_{len(media_files)+1}.mp4",
+#             "file_size": update.message.video.file_size
+#         })
+#         await update.message.reply_text(f"✅ Видео добавлено ({len(media_files)}/20)")
+#     
+#     # Handle document (like video)
+#     elif update.message.document:
+#         if update.message.document.mime_type and update.message.document.mime_type.startswith("video"):
+#             file_id = update.message.document.file_id
+#             media_files.append({
+#                 "file_id": file_id,
+#                 "file_type": "video",
+#                 "file_name": update.message.document.file_name or f"video_{len(media_files)+1}.mp4",
+#                 "file_size": update.message.document.file_size
+#             })
+#             await update.message.reply_text(f"✅ Видео добавлено ({len(media_files)}/20)")
+#         else:
+#             await update.message.reply_text("❌ Поддерживаются только фото и видео.")
+#     
+#     else:
+#         await update.message.reply_text("❌ Пожалуйста, отправьте фото или видео.")
+#     
+#     context.user_data["task_data"]["media_files"] = media_files
+#     return TASK_STEP_MEDIA
+
+
+# COMMENTED OUT - Media step removed, but functionality preserved for future use
+# async def task_done_media(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+#     """Finish media upload and proceed to date selection."""
+#     if "task_data" not in context.user_data:
+#         await update.message.reply_text("❌ Нет активного задания.")
+#         return ConversationHandler.END
+#     
+#     media_count = len(context.user_data["task_data"].get("media_files", []))
+#     await update.message.reply_text(f"✅ Загружено {media_count} файл(ов). Переходим к выбору даты...")
+#     
+#     context.user_data["task_data"]["waiting_for_media"] = False
+#     await show_date_step(update, context, is_query=False)
+#     return TASK_STEP_DATE
+# 
+# 
+# async def task_skip_media(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+#     """Skip media and proceed to date selection."""
+#     query = update.callback_query
+#     await query.answer()
+#     
+#     context.user_data["task_data"]["waiting_for_media"] = False
+#     await show_date_step(update, context, is_query=True)
+#     return TASK_STEP_DATE
 
 
 async def task_toggle_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -569,15 +566,9 @@ async def task_confirm_users(update: Update, context: ContextTypes.DEFAULT_TYPE)
     task_data = context.user_data["task_data"]
     assigned_users = task_data.get("assigned_users", [])
     
-    # Combine title and description
+    # Get title and description separately
     title = task_data.get("title", "")
     description = task_data.get("description", "")
-    
-    # If description exists and is different from title, combine them
-    if description and description != title:
-        full_description = f"{title}\n\n{description}"
-    else:
-        full_description = title
     
     # Determine group_id for the task
     # If creator has a group, use it; otherwise use the first assigned user's group
@@ -599,10 +590,11 @@ async def task_confirm_users(update: Update, context: ContextTypes.DEFAULT_TYPE)
     task_id = db_create_task(
         date=task_data["date"],
         time=task_data["time"],
-        description=full_description,
+        description=description or title,  # Use description, fallback to title
         group_id=group_id,
         admin_id=task_data["admin_id"],
-        assigned_to_list=assigned_users
+        assigned_to_list=assigned_users,
+        title=title
     )
     
     keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="start_menu")]]
@@ -648,13 +640,13 @@ async def task_confirm_users(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 
 async def task_skip_description(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Skip description and proceed to media step."""
+    """Skip description and proceed to date step."""
     query = update.callback_query
     await query.answer()
     
     context.user_data["task_data"]["description_skipped"] = True
-    await show_media_step(update, context, is_query=True)
-    return TASK_STEP_MEDIA
+    await show_date_step(update, context, is_query=True)
+    return TASK_STEP_DATE
 
 
 async def task_forward_to_description(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -666,13 +658,14 @@ async def task_forward_to_description(update: Update, context: ContextTypes.DEFA
     return TASK_STEP_DESCRIPTION
 
 
-async def task_forward_to_media(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Navigate forward to media input step."""
-    query = update.callback_query
-    await query.answer()
-    
-    await show_media_step(update, context, is_query=True)
-    return TASK_STEP_MEDIA
+# COMMENTED OUT - Media step removed
+# async def task_forward_to_media(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+#     """Navigate forward to media input step."""
+#     query = update.callback_query
+#     await query.answer()
+#     
+#     await show_media_step(update, context, is_query=True)
+#     return TASK_STEP_MEDIA
 
 
 async def task_forward_to_date(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -720,13 +713,14 @@ async def task_back_to_description(update: Update, context: ContextTypes.DEFAULT
     return TASK_STEP_DESCRIPTION
 
 
-async def task_back_to_media(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Navigate back to media input step."""
-    query = update.callback_query
-    await query.answer()
-    
-    await show_media_step(update, context, is_query=True)
-    return TASK_STEP_MEDIA
+# COMMENTED OUT - Media step removed
+# async def task_back_to_media(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+#     """Navigate back to media input step."""
+#     query = update.callback_query
+#     await query.answer()
+#     
+#     await show_media_step(update, context, is_query=True)
+#     return TASK_STEP_MEDIA
 
 
 async def task_back_to_date(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:

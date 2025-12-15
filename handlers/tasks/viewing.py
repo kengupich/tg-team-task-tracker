@@ -4,7 +4,7 @@ import json
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 
-from database import get_task_by_id, get_group, get_user_by_id, get_task_media
+from database import get_task_by_id, get_group, get_user_by_id, get_task_media, get_task_assignee_statuses
 from utils.permissions import is_super_admin, is_group_admin, can_edit_task
 
 logger = logging.getLogger(__name__)
@@ -16,6 +16,11 @@ async def view_task_detail(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     
     task_id = int(query.data.split("_")[-1])
     user_id = query.from_user.id
+    
+    # Track where user came from if not already set (for back navigation)
+    if 'task_view_source' not in context.user_data:
+        # Try to determine source based on callback history or default to 'user_my_tasks'
+        context.user_data['task_view_source'] = 'user_my_tasks'
     
     # Get task details
     task = get_task_by_id(task_id)
@@ -34,35 +39,43 @@ async def view_task_detail(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     # Get assigned users
     import json
     assigned_ids = json.loads(task.get('assigned_to_list') or '[]')
+    
+    # Get assignee statuses
+    assignee_statuses = get_task_assignee_statuses(task_id)
+    
     assigned_users = []
     for uid in assigned_ids:
         u = get_user_by_id(uid)
         if u:
-            assigned_users.append(u['name'])
+            # Get status emoji for this assignee
+            user_status = assignee_statuses.get(uid, 'pending')
+            status_emoji = {
+                'pending': '⏳',
+                'in_progress': '🔄',
+                'completed': '✅',
+                'cancelled': '❌'
+            }.get(user_status, '❓')
+            assigned_users.append(f"{status_emoji} {u['name']}")
     
     # Format status
-    status_text = {
-        'pending': '⏳ Ожидает',
-        'in_progress': '🔄 В работе',
-        'completed': '✅ Завершено',
-        'cancelled': '❌ Отменено'
-    }.get(task['status'], task['status'])
+    from utils.helpers import format_task_status
+    status_text = format_task_status(task['status'])
     
     # Build task info
     task_info = (
-        f"📋 ЗАДАНИЕ #{task['task_id']}\n\n"
+        f"📋 ЗАДАНИЕ #{task['task_id']} {task['title']}\n\n"
         f"📅 Дата: {task['date']}\n"
-        f"🕐 Время: {task['time']}\n"
+        f"🕐 Дедлайн: {task['time']}\n"
         f"📍 Отдел: {group_name}\n"
-        f"📊 Статус: {status_text}\n"
+        f"📊 Общий статус: {status_text}\n"
         f"👤 Постановщик: {creator_name}\n\n"
         f"📝 Описание:\n{task['description']}\n\n"
     )
     
     if assigned_users:
         task_info += f"👥 Исполнители ({len(assigned_users)}):\n"
-        for name in assigned_users[:5]:  # Show first 5
-            task_info += f"  • {name}\n"
+        for name_with_status in assigned_users[:5]:  # Show first 5
+            task_info += f"  {name_with_status}\n"
         if len(assigned_users) > 5:
             task_info += f"  ... и еще {len(assigned_users) - 5}\n"
     else:
@@ -101,13 +114,27 @@ async def view_task_detail(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             # Assigned executor can change status
             keyboard.append([InlineKeyboardButton("🔄 Изменить статус", callback_data=f"change_task_status_{task_id}")])
     
-    # Add back button based on user role
-    if is_super_admin(user_id):
-        keyboard.append([InlineKeyboardButton("⬅️ К списку заданий", callback_data="super_manage_tasks")])
+    # Add back button based on where user came from (if they're assigned to this task, prioritize user_my_tasks)
+    back_callback = context.user_data.get('task_view_source', 'user_my_tasks')
+    
+    if is_assigned and back_callback == 'admin_view_tasks':
+        # If assigned to task and came from admin view, prioritize going back to user's tasks
+        back_callback = 'user_my_tasks'
+        back_text = "⬅️ К моим заданиям"
+    elif is_assigned:
+        back_callback = 'user_my_tasks'
+        back_text = "⬅️ К моим заданиям"
+    elif is_super_admin(user_id):
+        back_callback = 'super_manage_tasks'
+        back_text = "⬅️ К списку заданий"
     elif is_group_admin(user_id):
-        keyboard.append([InlineKeyboardButton("⬅️ К списку заданий", callback_data="admin_view_tasks")])
+        back_callback = 'admin_view_tasks'
+        back_text = "⬅️ К списку заданий"
     else:
-        keyboard.append([InlineKeyboardButton("⬅️ К моим заданиям", callback_data="user_my_tasks")])
+        back_callback = 'user_my_tasks'
+        back_text = "⬅️ К моим заданиям"
+    
+    keyboard.append([InlineKeyboardButton(back_text, callback_data=back_callback)])
     
     reply_markup = InlineKeyboardMarkup(keyboard)
     await query.edit_message_text(task_info, reply_markup=reply_markup)

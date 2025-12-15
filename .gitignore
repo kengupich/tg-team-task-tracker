@@ -43,4 +43,8 @@ Thumbs.db
 # Project specific
 *.db
 .env
-*.log 
+*.log
+
+# Local documentation and non-critical files
+local/
+test_*.db

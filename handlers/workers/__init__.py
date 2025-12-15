@@ -14,6 +14,8 @@ logger = logging.getLogger(__name__)
 
 async def user_my_tasks(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Redirect to filter_tasks_assigned for backward compatibility."""
+    # Set task view source to user_my_tasks (for proper back navigation from task details)
+    context.user_data['task_view_source'] = 'user_my_tasks'
     return await filter_tasks_assigned(update, context)
 
 

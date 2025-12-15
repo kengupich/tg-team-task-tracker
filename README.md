@@ -1,224 +1,217 @@
 # 🤖 Team Task Management Telegram Bot
 
-Telegram бот для управління командними завданнями з підтримкою груп, адміністраторів та працівників.
+Telegram bot for managing team tasks with support for groups, administrators, and employees.
 
-## ✨ Можливості
+**Database:** PostgreSQL (local development & Railway production) | **Status:** ✅ Production Ready
 
-### 👑 Супер-адмін:
-- Управління групами (створення, редагування, видалення)
-- Управління користувачами (реєстрація, блокування, видалення)
-- Призначення адміністраторів груп
-- Розподіл користувачів по групам
-- Створення завдань для будь-якої групи
+## ✨ Features
 
-### 👨‍💼 Адміністратор групи:
-- Створення завдань для своєї групи
-- Призначення виконавців (до 10 на завдання)
-- Перегляд завдань групи
-- Управління статусами завдань
+### 👑 Super Admin:
+- Group management (creation, editing, deletion)
+- User management (registration, blocking, deletion)
+- Appointing group administrators
+- Distributing users across groups
+- Creating tasks for any group
 
-### 👷 Працівник:
-- Отримання сповіщень про нові завдання
-- Перегляд призначених завдань
-- Зміна статусу завдань (В роботі → Виконано)
-- Перегляд статистики
+### 👨‍💼 Group Administrator:
+- Creating tasks for your group
+- Assigning executors (up to 10 per task)
+- Viewing group tasks
+- Managing task statuses
 
-### 📋 Завдання:
-- Назва, опис, дедлайн (дата + час)
-- Медіафайли (фото, відео, документи)
-- Багато виконавців на одне завдання
-- Історія змін статусу
-- Автоматичні нагадування про дедлайни
+### 👷 Employee:
+- Receiving notifications about new tasks
+- Viewing assigned tasks
+- Changing task statuses (In progress → Completed)
+- Viewing statistics
 
----
-
-## 🚀 Швидкий старт
-
-### Локальний запуск
-
-1. Клонуйте репозиторій:
-   ```bash
-   git clone https://github.com/YOUR_USERNAME/Telegram-Bot-for-Team-Task-Management.git
-   cd Telegram-Bot-for-Team-Task-Management
-   ```
-
-2. Встановіть залежності:
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-3. Налаштуйте `.env` файл:
-   ```bash
-   cp .env.example .env
-   # Відредагуйте .env файл, додайте токен бота та ID адміна
-   ```
-
-4. Запустіть бота:
-   ```bash
-   python bot.py
-   ```
-
-### ☁️ Деплой на Railway.app (рекомендовано)
-
-**Для замовників:** 📖 [CUSTOMER_GUIDE.md](CUSTOMER_GUIDE.md) - проста інструкція українською
-
-**Для розробників:** 📖 [DEPLOYMENT.md](DEPLOYMENT.md) - детальна технічна документація
-
-**Швидкий деплой:**
-1. Fork цього репозиторію
-2. Створіть проєкт на [Railway.app](https://railway.app)
-3. Підключіть GitHub репозиторій
-4. Додайте змінні оточення (TELEGRAM_BOT_TOKEN, SUPER_ADMIN_ID)
-5. Railway автоматично задеплоїть бота ✅
+### 📋 Task:
+- Title, description, deadline (date + time)
+- Media files (photos, videos, documents)
+- Multiple assignees per task
+- Status change history
+- Automatic deadline reminders
 
 ---
 
-## 📁 Структура проєкту
+## 🚀 Quick start
 
-```
-├── bot.py                 # Головний файл бота
-├── database.py            # Робота з базою даних (SQLite)
-├── handlers/              # Обробники команд
-│   ├── common/           # Загальні команди (/start, /help)
-│   ├── super_admin/      # Функції супер-адміна
-│   ├── group_admin/      # Функції адміна групи
-│   ├── workers/          # Функції працівників
-│   ├── tasks/            # Створення та перегляд завдань
-│   ├── notifications.py  # Сповіщення
-│   └── registration.py   # Реєстрація користувачів
-├── utils/                # Допоміжні функції
-│   ├── helpers.py        # Календар, час, кнопки
-│   └── permissions.py    # Перевірка прав доступу
-├── requirements.txt      # Python залежності
-├── railway.json          # Конфігурація Railway
-├── Procfile             # Команда запуску для хостингу
-├── runtime.txt          # Версія Python
-├── .env.example         # Приклад змінних оточення
-├── DEPLOYMENT.md        # Інструкція деплою
-└── CUSTOMER_GUIDE.md    # Інструкція для замовника
+### Local launch
+
+1. Clone the repository:
+```bash
+git clone https://github.com/YOUR_USERNAME/Telegram-Bot-for-Team-Task-Management.git
+cd Telegram-Bot-for-Team-Task-Management
 ```
 
+2. **Setup PostgreSQL** (Docker recommended):
+```bash
+# Option A: Docker Compose (easiest)
+docker-compose up -d
+
+# Option B: Manual installation
+# See local/POSTGRESQL_SETUP.md for detailed instructions
+```
+
+3. Install Python dependencies:
+```bash
+pip install -r requirements.txt
+```
+
+4. Initialize the database:
+```bash
+# Automatically creates tables and schema
+python database.py
+```
+
+5. Configure the `.env` file:
+```bash
+cp .env.example .env
+# Edit .env: add TELEGRAM_BOT_TOKEN and SUPER_ADMIN_ID
+# DATABASE_URL is optional (uses local PostgreSQL if not set)
+```
+
+6. Run the bot:
+```bash
+# Development mode (polling)
+python bot.py
+```
+
+**For detailed PostgreSQL setup:** see [`local/POSTGRESQL_SETUP.md`](local/POSTGRESQL_SETUP.md)
+
+### ☁️ Deploy on Railway.app (recommended)
+
+**Quick deployment:**
+1. Fork this repository
+2. Create a project on [Railway.app](https://railway.app)
+3. Add **PostgreSQL plugin** (Railway automatically manages DATABASE_URL)
+4. Connect the GitHub repository
+5. Add environment variables:
+   - `TELEGRAM_BOT_TOKEN` - Your bot token from @BotFather
+   - `SUPER_ADMIN_ID` - Your Telegram user ID
+   - `ENVIRONMENT=production`
+   - `USE_WEBHOOK=true`
+   - `RAILWAY_URL` - Your Railway app URL
+6. Railway will automatically deploy the bot ✅
+
+Database schema initializes automatically on first deployment!
+
+
 ---
 
-## ⚙️ Налаштування
+## 📁 Project structure
 
-### Змінні оточення (.env)
+```
+├── bot.py                 # Main bot file
+├── db_postgres.py         # PostgreSQL connection handler
+├── database.py            # Database operations (PostgreSQL)
+├── handlers/              # Command handlers
+│   ├── common/            # Common commands (/start, /help)
+│   ├── super_admin/       # Super admin functions
+│   ├── group_admin/       # Group admin functions
+│   ├── workers/           # Worker functions
+│   ├── tasks/             # Creating and viewing tasks
+│   ├── notifications.py   # Notifications
+│   └── registration.py    # User registration
+├── utils/                 # Utility functions
+│   ├── helpers.py         # Calendar, time, buttons
+│   └── permissions.py     # Access rights verification
+├── requirements.txt       # Python dependencies
+├── railway.json           # Railway configuration
+├── Procfile               # Start command for hosting
+├── runtime.txt            # Python version
+├── .env.example           # Example environment variables
+```
+
+---
+
+## ⚙️ Configuration
+
+### Environment variables (.env)
 
 ```env
 TELEGRAM_BOT_TOKEN=your_bot_token_here
 SUPER_ADMIN_ID=your_telegram_user_id
 ```
 
-**Де взяти:**
+**Where to get it:**
 - `TELEGRAM_BOT_TOKEN`: [@BotFather](https://t.me/BotFather) → /newbot
 - `SUPER_ADMIN_ID`: [@userinfobot](https://t.me/userinfobot) → /start
 
-### База даних
+### Database
 
-SQLite база (`tasks.db`) створюється автоматично при першому запуску.
-
-**Таблиці:**
-- `users` - користувачі
-- `groups` - робочі групи
-- `tasks` - завдання
-- `task_media` - медіафайли
-- `task_history` - історія змін
-- `user_groups` - зв'язок користувачів з групами
-- `group_admins` - адміністратори груп
-- `registration_requests` - запити на реєстрацію
+The SQLite database (`task_management.db`) is created automatically when you first start the bot.
 
 ---
 
-## 🧪 Тестування
+## 🧪 Testing
 
-Запуск тестів:
+Running tests:
 ```bash
 python -m pytest tests/ -v
 ```
 
-Тести з покриттям:
+Coverage tests:
 ```bash
 pytest tests/ --cov=. --cov-report=html
 ```
 
-**Статистика:** 46 тестів, 37% покриття коду
 
----
-
-## 📖 Документація
-
-- **[CUSTOMER_GUIDE.md](CUSTOMER_GUIDE.md)** - Швидкий старт для замовника (українською)
-- **[DEPLOYMENT.md](DEPLOYMENT.md)** - Детальна інструкція деплою на Railway
-- **[tests/README.md](tests/README.md)** - Документація тестів
-
----
-
-## 🛠️ Технології
+## 🛠️ Technologies
 
 - **Python 3.10+**
 - **python-telegram-bot 20.7** - Telegram Bot API
-- **APScheduler 3.10** - Планування нагадувань
-- **SQLite3** - База даних
-- **python-dotenv** - Управління змінними оточення
+- **APScheduler 3.10** - Reminder scheduling
+- **SQLite3** - Database
+- **python-dotenv** - Environment variable management
 
 ---
 
-## 📊 Можливості системи
+## 📊 System capabilities
 
-### Ієрархія користувачів:
+### User hierarchy:
 ```
-Супер-адмін (повний доступ)
+Super admin (full access)
     ↓
-Адмін групи (управління своєю групою)
+Group admin (manage your group)
     ↓
-Працівник (виконання завдань)
+Employee (task execution)
 ```
 
-### Життєвий цикл завдання:
+### Task lifecycle:
 ```
-Нове → В роботі → Виконано
+New → In progress → Completed
          ↓
-    (Скасовано)
+    (Cancelled)
 ```
 
 ---
 
-## 🔐 Безпека
+## 🔐 Security
 
-- ✅ Токен бота зберігається у `.env` (не в Git)
-- ✅ `.env` в `.gitignore`
-- ✅ Перевірка прав доступу на кожну дію
-- ✅ Валідація даних користувача
-- ✅ Логування всіх операцій
-
----
-
-## 🤝 Внесок у проєкт
-
-1. Fork репозиторій
-2. Створіть feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit зміни (`git commit -m 'Add AmazingFeature'`)
-4. Push у branch (`git push origin feature/AmazingFeature`)
-5. Створіть Pull Request
+- ✅ Bot token is stored in `.env` (not in Git)
+- ✅ `.env` in `.gitignore`
+- ✅ Access rights check for each action
+- ✅ User data validation
+- ✅ Logging of all operations
 
 ---
 
-## 📝 Ліцензія
+## 📝 Licence
 
-Цей проєкт створено для внутрішнього використання. Усі права захищені.
-
----
-
-## 📞 Контакти
-
-**GitHub:** [HullyMully/Telegram-Bot-for-Team-Task-Management](https://github.com/HullyMully/Telegram-Bot-for-Team-Task-Management)
+This project is created for internal use. All rights reserved.
 
 ---
 
-## 🎉 Подяки
+## 📞 Contact
 
-Дякуємо всім, хто використовує цього бота для управління командними завданнями!
+**GitHub:** Author of the repository on which this solution is based [HullyMully/Telegram-Bot-for-Team-Task-Management](https://github.com/HullyMully/Telegram-Bot-for-Team-Task-Management)
 
-**Версія:** 2.1  
-**Остання оновлення:** Грудень 2025
-   
+---
+
+## 🎉 Acknowledgements
+
+Thank you to everyone who uses this bot for team task management!
+
+**Version:** 2.2  
+**Last update:** December 2025

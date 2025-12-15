@@ -2,10 +2,12 @@
 Database module for Team Task Management Bot.
 Handles all database operations including creating tasks, managing users,
 and tracking performance metrics.
+
+Uses PostgreSQL exclusively (local or Railway).
 """
-import sqlite3
 import logging
 from datetime import datetime
+from db_postgres import get_db_connection
 
 # Set up logging
 logging.basicConfig(
@@ -13,52 +15,60 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Database file
-DB_FILE = "task_management.db"
 
 def init_db():
     """Initialize database tables if they don't exist."""
-    conn = sqlite3.connect(DB_FILE)
+    db_conn = get_db_connection()
+    conn = db_conn.get_connection()
     cursor = conn.cursor()
     
-    # Create groups table
+    # Create users table first (no dependencies)
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS users (
+        user_id BIGINT PRIMARY KEY,
+        name TEXT NOT NULL,
+        username TEXT,
+        group_id INTEGER,
+        registered INTEGER DEFAULT 0,
+        banned INTEGER DEFAULT 0,
+        deleted INTEGER DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    ''')
+    
+    # Create groups table (after users exists)
     cursor.execute('''
     CREATE TABLE IF NOT EXISTS groups (
-        group_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        group_id SERIAL PRIMARY KEY,
         name TEXT NOT NULL UNIQUE,
-        admin_id INTEGER,
+        admin_id BIGINT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (admin_id) REFERENCES users(user_id)
     )
     ''')
     
-    # Create users table
-    cursor.execute('''
-    CREATE TABLE IF NOT EXISTS users (
-        user_id INTEGER PRIMARY KEY,
-        name TEXT NOT NULL,
-        username TEXT,  -- Telegram username (without @)
-        group_id INTEGER,
-        registered INTEGER DEFAULT 0,  -- 0 = not registered, 1 = registered via password
-        banned INTEGER DEFAULT 0,  -- 0 = not banned, 1 = banned
-        deleted INTEGER DEFAULT 0,  -- 0 = active, 1 = deleted (hidden from lists)
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (group_id) REFERENCES groups(group_id)
-    )
-    ''')
+    # Add group_id foreign key to users (after groups exists)
+    try:
+        cursor.execute('''
+        ALTER TABLE users
+        ADD CONSTRAINT fk_user_group FOREIGN KEY (group_id) REFERENCES groups(group_id)
+        ''')
+    except Exception:
+        pass  # Constraint might already exist
     
     # Create tasks table
     cursor.execute('''
     CREATE TABLE IF NOT EXISTS tasks (
-        task_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        task_id SERIAL PRIMARY KEY,
+        title TEXT,
         date TEXT NOT NULL,
         time TEXT NOT NULL,
         description TEXT NOT NULL,
         group_id INTEGER NOT NULL,
-        assigned_to_list TEXT,  -- JSON list of user IDs
-        has_media INTEGER DEFAULT 0,  -- 1 if task has media attachments
-        status TEXT DEFAULT 'pending',  -- pending, in_progress, completed, cancelled
-        created_by INTEGER,  -- admin ID who created the task
+        assigned_to_list TEXT,
+        has_media INTEGER DEFAULT 0,
+        status TEXT DEFAULT 'pending',
+        created_by BIGINT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (group_id) REFERENCES groups(group_id),
@@ -66,13 +76,13 @@ def init_db():
     )
     ''')
     
-    # Create task_media table to store attachments
+    # Create task_media table
     cursor.execute('''
     CREATE TABLE IF NOT EXISTS task_media (
-        media_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        media_id SERIAL PRIMARY KEY,
         task_id INTEGER NOT NULL,
-        file_id TEXT NOT NULL,  -- Telegram file_id
-        file_type TEXT NOT NULL,  -- 'photo' or 'video'
+        file_id TEXT NOT NULL,
+        file_type TEXT NOT NULL,
         file_name TEXT,
         file_size INTEGER,
         added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -80,41 +90,41 @@ def init_db():
     )
     ''')
     
-    # Create task_history table for logging changes
+    # Create task_history table
     cursor.execute('''
     CREATE TABLE IF NOT EXISTS task_history (
-        history_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        history_id SERIAL PRIMARY KEY,
         task_id INTEGER NOT NULL,
-        action TEXT NOT NULL,  -- 'created', 'updated', 'deleted', 'status_changed'
+        action TEXT NOT NULL,
         old_value TEXT,
         new_value TEXT,
-        changed_by INTEGER,  -- admin_id or user_id
+        changed_by BIGINT,
         changed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (task_id) REFERENCES tasks(id),
+        FOREIGN KEY (task_id) REFERENCES tasks(task_id),
         FOREIGN KEY (changed_by) REFERENCES users(user_id)
     )
     ''')
     
-    # Create registration_requests table for pending user approvals
+    # Create registration_requests table
     cursor.execute('''
     CREATE TABLE IF NOT EXISTS registration_requests (
-        request_id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER NOT NULL UNIQUE,
+        request_id SERIAL PRIMARY KEY,
+        user_id BIGINT NOT NULL UNIQUE,
         name TEXT NOT NULL,
         username TEXT,
-        status TEXT DEFAULT 'pending',  -- 'pending', 'approved', 'rejected'
+        status TEXT DEFAULT 'pending',
         requested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        reviewed_by INTEGER,  -- admin_id who approved/rejected
+        reviewed_by BIGINT,
         reviewed_at TIMESTAMP
     )
     ''')
     
-    # Create group_admins table for many-to-many relationship between groups and admins
+    # Create group_admins table
     cursor.execute('''
     CREATE TABLE IF NOT EXISTS group_admins (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id SERIAL PRIMARY KEY,
         group_id INTEGER NOT NULL,
-        admin_id INTEGER NOT NULL,
+        admin_id BIGINT NOT NULL,
         assigned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (group_id) REFERENCES groups(group_id) ON DELETE CASCADE,
         FOREIGN KEY (admin_id) REFERENCES users(user_id) ON DELETE CASCADE,
@@ -122,11 +132,11 @@ def init_db():
     )
     ''')
     
-    # Create user_groups table for many-to-many relationship between users and groups
+    # Create user_groups table
     cursor.execute('''
     CREATE TABLE IF NOT EXISTS user_groups (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER NOT NULL,
+        id SERIAL PRIMARY KEY,
+        user_id BIGINT NOT NULL,
         group_id INTEGER NOT NULL,
         assigned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
@@ -135,25 +145,34 @@ def init_db():
     )
     ''')
     
-    # Add deleted column to users table if it doesn't exist (migration)
-    try:
-        cursor.execute("ALTER TABLE users ADD COLUMN deleted INTEGER DEFAULT 0")
-        conn.commit()
-    except sqlite3.OperationalError:
-        # Column already exists
-        pass
-    
-    # Add username column to users table if it doesn't exist (migration)
-    try:
-        cursor.execute("ALTER TABLE users ADD COLUMN username TEXT")
-        conn.commit()
-    except sqlite3.OperationalError:
-        # Column already exists
-        pass
+    # Create task_assignees table
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS task_assignees (
+        id SERIAL PRIMARY KEY,
+        task_id INTEGER NOT NULL,
+        user_id BIGINT NOT NULL,
+        status TEXT DEFAULT 'pending',
+        assigned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        status_updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (task_id) REFERENCES tasks(task_id) ON DELETE CASCADE,
+        FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
+        UNIQUE(task_id, user_id)
+    )
+    ''')
     
     conn.commit()
     conn.close()
     logger.info("Database initialized")
+
+
+def _get_db_connection():
+    """
+    Get database connection (SQLite or PostgreSQL).
+    This is an internal helper function used by all database operations.
+    """
+    db_conn = get_db_connection()
+    return db_conn.get_connection()
+
 
 def add_user(user_id, name, username=None):
     """
@@ -167,18 +186,18 @@ def add_user(user_id, name, username=None):
     Returns:
         bool: True if user was added, False if user already exists
     """
-    conn = sqlite3.connect(DB_FILE)
+    conn = _get_db_connection()
     cursor = conn.cursor()
     
     try:
-        cursor.execute("SELECT user_id FROM users WHERE user_id = ?", (user_id,))
+        cursor.execute("SELECT user_id FROM users WHERE user_id = %s", (user_id,))
         if cursor.fetchone():
             # user already exists
             conn.close()
             return False
         
         cursor.execute(
-            "INSERT INTO users (user_id, name, username) VALUES (?, ?, ?)",
+            "INSERT INTO users (user_id, name, username) VALUES (%s, %s, %s)",
             (user_id, name, username)
         )
         conn.commit()
@@ -200,17 +219,17 @@ def remove_user(user_id):
     Returns:
         bool: True if user was removed, False if user doesn't exist
     """
-    conn = sqlite3.connect(DB_FILE)
+    conn = _get_db_connection()
     cursor = conn.cursor()
     
     try:
-        cursor.execute("SELECT user_id FROM users WHERE user_id = ?", (user_id,))
+        cursor.execute("SELECT user_id FROM users WHERE user_id = %s", (user_id,))
         if not cursor.fetchone():
             # user doesn't exist
             conn.close()
             return False
         
-        cursor.execute("DELETE FROM users WHERE user_id = ?", (user_id,))
+        cursor.execute("DELETE FROM users WHERE user_id = %s", (user_id,))
         conn.commit()
         conn.close()
         logger.info(f"Removed user with ID: {user_id}")
@@ -228,15 +247,14 @@ def get_all_users():
     Returns:
         list: List of dictionaries containing user information with group_name and all_groups
     """
-    conn = sqlite3.connect(DB_FILE)
-    conn.row_factory = sqlite3.Row
+    conn = _get_db_connection()
     cursor = conn.cursor()
     
     try:
         cursor.execute("""
             SELECT DISTINCT u.user_id, u.name, u.username, u.banned,
-                   GROUP_CONCAT(DISTINCT g.group_id) as group_ids,
-                   GROUP_CONCAT(DISTINCT g.name) as group_names
+                   STRING_AGG(DISTINCT g.group_id::text, ',') as group_ids,
+                   STRING_AGG(DISTINCT g.name, ',') as group_names
             FROM users u
             LEFT JOIN user_groups ug ON u.user_id = ug.user_id
             LEFT JOIN groups g ON ug.group_id = g.group_id
@@ -247,22 +265,26 @@ def get_all_users():
         rows = cursor.fetchall()
         users = []
         for row in rows:
-            # Parse group_ids and group_names
-            group_ids_str = row["group_ids"] if row["group_ids"] else ""
-            group_names_str = row["group_names"] if row["group_names"] else ""
+            # Parse group_ids and group_names (convert tuple to dict)
+            user_id = row[0]
+            name = row[1]
+            username = row[2]
+            banned = row[3]
+            group_ids_str = row[4] if row[4] else ""
+            group_names_str = row[5] if row[5] else ""
             
             # Get first group (for backwards compatibility)
             group_id = int(group_ids_str.split(',')[0]) if group_ids_str else None
             group_name = group_names_str.split(',')[0] if group_names_str else None
             
             users.append({
-                "user_id": row["user_id"],
-                "name": row["name"],
-                "username": row["username"],
+                "user_id": user_id,
+                "name": name,
+                "username": username,
                 "group_id": group_id,
                 "group_name": group_name,
                 "all_groups": group_names_str,  # All groups comma-separated
-                "banned": row["banned"]
+                "banned": banned
             })
         conn.close()
         return users
@@ -274,7 +296,7 @@ def get_all_users():
 
 def get_users_without_group():
     """Get all users without any group assigned (using user_groups table)."""
-    conn = sqlite3.connect(DB_FILE)
+    conn = _get_db_connection()
     cursor = conn.cursor()
     try:
         # Get users who are NOT in user_groups table and NOT deleted
@@ -303,11 +325,11 @@ def get_user_by_id(user_id):
     Returns:
         dict: user information or None if not found
     """
-    conn = sqlite3.connect(DB_FILE)
+    conn = _get_db_connection()
     cursor = conn.cursor()
     
     try:
-        cursor.execute("SELECT user_id, name, banned FROM users WHERE user_id = ?", (user_id,))
+        cursor.execute("SELECT user_id, name, banned FROM users WHERE user_id = %s", (user_id,))
         row = cursor.fetchone()
         conn.close()
         
@@ -329,11 +351,11 @@ def user_exists(user_id):
     Returns:
         bool: True if user exists, False otherwise
     """
-    conn = sqlite3.connect(DB_FILE)
+    conn = _get_db_connection()
     cursor = conn.cursor()
     
     try:
-        cursor.execute("SELECT user_id FROM users WHERE user_id = ?", (user_id,))
+        cursor.execute("SELECT user_id FROM users WHERE user_id = %s", (user_id,))
         result = cursor.fetchone() is not None
         conn.close()
         return result
@@ -354,15 +376,15 @@ def create_task(date, time, description):
     Returns:
         int: ID of the created task, or None if creation failed
     """
-    conn = sqlite3.connect(DB_FILE)
+    conn = _get_db_connection()
     cursor = conn.cursor()
     
     try:
         cursor.execute(
-            "INSERT INTO tasks (date, time, description) VALUES (?, ?, ?)",
+            "INSERT INTO tasks (date, time, description) VALUES (%s, %s, %s) RETURNING task_id",
             (date, time, description)
         )
-        task_id = cursor.lastrowid
+        task_id = cursor.fetchone()[0]
         conn.commit()
         conn.close()
         logger.info(f"Created task with ID: {task_id}")
@@ -382,20 +404,25 @@ def get_task_by_id(task_id):
     Returns:
         dict: Task information or None if not found
     """
-    conn = sqlite3.connect(DB_FILE)
-    conn.row_factory = sqlite3.Row  # Enable row factory for dictionary access
+    conn = _get_db_connection()
     cursor = conn.cursor()
     
     try:
         cursor.execute(
-            "SELECT task_id, date, time, description, assigned_to FROM tasks WHERE task_id = ?", 
+            "SELECT task_id, date, time, description, assigned_to FROM tasks WHERE task_id = %s", 
             (task_id,)
         )
         row = cursor.fetchone()
         conn.close()
         
         if row:
-            return dict(row)
+            return {
+                "task_id": row[0],
+                "date": row[1],
+                "time": row[2],
+                "description": row[3],
+                "assigned_to": row[4]
+            }
         return None
     except Exception as e:
         logger.error(f"Error getting task: {e}")
@@ -412,12 +439,12 @@ def get_task_by_id(task_id):
         
     #Returns:
         #bool: True if update was successful, False otherwise
-    conn = sqlite3.connect(DB_FILE)
+    conn = _get_db_connection()
     cursor = conn.cursor()
     
     try:
         # Check if task exists
-        cursor.execute("SELECT task_id, assigned_to FROM tasks WHERE task_id = ?", (task_id,))
+        cursor.execute("SELECT task_id, assigned_to FROM tasks WHERE task_id = %s", (task_id,))
         task = cursor.fetchone()
         
         if not task:
@@ -430,7 +457,7 @@ def get_task_by_id(task_id):
             return False
         
         cursor.execute(
-            "UPDATE tasks SET assigned_to = ? WHERE task_id = ?",
+            "UPDATE tasks SET assigned_to = %s WHERE task_id = %s",
             (user_id, task_id)
         )
     
@@ -451,8 +478,7 @@ def get_all_tasks():
     Returns:
         list: List of dictionaries containing task information
     """
-    conn = sqlite3.connect(DB_FILE)
-    conn.row_factory = sqlite3.Row  # Enable row factory for dictionary access
+    conn = _get_db_connection()
     cursor = conn.cursor()
     
     try:
@@ -463,7 +489,14 @@ def get_all_tasks():
         )
         tasks = []
         for row in cursor.fetchall():
-            task = dict(row)
+            task = {
+                'task_id': row[0],
+                'date': row[1],
+                'time': row[2],
+                'description': row[3],
+                'assigned_to': row[4],
+                'user_name': row[5]
+            }
             if task["user_name"]:
                 task["assigned_to_name"] = task["user_name"]
             tasks.append(task)
@@ -484,20 +517,20 @@ def get_all_tasks():
     #Returns:
         #dict: Dictionary containing performance statistics
 
-    conn = sqlite3.connect(DB_FILE)
+    conn = _get_db_connection()
     cursor = conn.cursor()
     
     try:
         # Get accepted tasks count
         cursor.execute(
-            "SELECT COUNT(*) FROM user_responses WHERE user_id = ? AND response = 'accepted'",
+            "SELECT COUNT(*) FROM user_responses WHERE user_id = %s AND response = 'accepted'",
             (user_id,)
         )
         accepted = cursor.fetchone()[0]
         
         # Get declined tasks count
         cursor.execute(
-            "SELECT COUNT(*) FROM user_responses WHERE user_id = ? AND response = 'declined'",
+            "SELECT COUNT(*) FROM user_responses WHERE user_id = %s AND response = 'declined'",
             (user_id,)
         )
         declined = cursor.fetchone()[0]
@@ -541,43 +574,39 @@ def create_group(name, admin_id = None):
     Returns:
         int: ID of the created group, or None if creation failed
     """
-    conn = sqlite3.connect(DB_FILE)
+    conn = _get_db_connection()
     cursor = conn.cursor()
     
     try:
         if admin_id is None:
             cursor.execute(
-                "INSERT INTO groups (name) VALUES (?)",
+                "INSERT INTO groups (name) VALUES (%s) RETURNING group_id",
                 (name,)
             )
         else:
             cursor.execute(
-                "INSERT INTO groups (name, admin_id) VALUES (?, ?)",
+                "INSERT INTO groups (name, admin_id) VALUES (%s, %s) RETURNING group_id",
                 (name, admin_id)
             )
 
-        group_id = cursor.lastrowid
+        group_id = cursor.fetchone()[0]
         conn.commit()
         conn.close()
         logger.info(f"Created group '{name}' (ID: {group_id})")
         return group_id
-    except sqlite3.IntegrityError as e:
-        logger.error(f"Error creating group (likely duplicate name): {e}")
-        conn.close()
-        return None
     except Exception as e:
-        logger.exception(f"Error creating group: {e}")
+        logger.error(f"Error creating group (likely duplicate name): {e}")
         conn.close()
         return None
     
 
 def get_group(group_id):
     """Get group information by ID."""
-    conn = sqlite3.connect(DB_FILE)
+    conn = _get_db_connection()
     cursor = conn.cursor()
     
     try:
-        cursor.execute("SELECT group_id, name, admin_id FROM groups WHERE group_id = ?", (group_id,))
+        cursor.execute("SELECT group_id, name, admin_id FROM groups WHERE group_id = %s", (group_id,))
         row = cursor.fetchone()
         conn.close()
         
@@ -592,7 +621,7 @@ def get_group(group_id):
 
 def get_all_groups():
     """Get all groups."""
-    conn = sqlite3.connect(DB_FILE)
+    conn = _get_db_connection()
     cursor = conn.cursor()
     
     try:
@@ -619,19 +648,19 @@ def update_group_admin(group_id, new_admin_id):
     Returns:
         bool: True if update was successful
     """
-    conn = sqlite3.connect(DB_FILE)
+    conn = _get_db_connection()
     cursor = conn.cursor()
     
     try:
         # Check if new admin exists as a user (users table uses column 'user_id')
-        cursor.execute("SELECT user_id FROM users WHERE user_id = ?", (new_admin_id,))
+        cursor.execute("SELECT user_id FROM users WHERE user_id = %s", (new_admin_id,))
         if not cursor.fetchone():
             logger.error(f"New admin user {new_admin_id} does not exist")
             conn.close()
             return False
         
         cursor.execute(
-            "UPDATE groups SET admin_id = ? WHERE group_id = ?",
+            "UPDATE groups SET admin_id = %s WHERE group_id = %s",
             (new_admin_id, group_id)
         )
         conn.commit()
@@ -659,35 +688,36 @@ def add_group_admin(group_id, admin_id):
     Returns:
         bool: True if admin was added successfully
     """
-    conn = sqlite3.connect(DB_FILE)
+    # Ensure admin_id exists in users table
+    if not user_exists(admin_id):
+        add_user(admin_id, f"User_{admin_id}", None)
+    
+    conn = _get_db_connection()
     cursor = conn.cursor()
     
     try:
-        # Check if user exists
-        cursor.execute("SELECT user_id FROM users WHERE user_id = ?", (admin_id,))
-        if not cursor.fetchone():
-            logger.error(f"User {admin_id} does not exist")
-            conn.close()
-            return False
-        
         # Check if group exists
-        cursor.execute("SELECT group_id FROM groups WHERE group_id = ?", (group_id,))
+        cursor.execute("SELECT group_id FROM groups WHERE group_id = %s", (group_id,))
         if not cursor.fetchone():
             logger.error(f"Group {group_id} does not exist")
             conn.close()
             return False
         
-        # Add to group_admins (will fail if already exists due to UNIQUE constraint)
-        cursor.execute(
-            "INSERT OR IGNORE INTO group_admins (group_id, admin_id) VALUES (?, ?)",
-            (group_id, admin_id)
-        )
+        # Add to group_admins (will do nothing if already exists due to UNIQUE constraint)
+        try:
+            cursor.execute(
+                "INSERT INTO group_admins (group_id, admin_id) VALUES (%s, %s)",
+                (group_id, admin_id)
+            )
+        except Exception:
+            # Already exists due to UNIQUE constraint
+            pass
         
         # Also update legacy admin_id field in groups table for backward compatibility
-        cursor.execute("SELECT admin_id FROM groups WHERE group_id = ?", (group_id,))
+        cursor.execute("SELECT admin_id FROM groups WHERE group_id = %s", (group_id,))
         current_admin = cursor.fetchone()[0]
         if current_admin is None:
-            cursor.execute("UPDATE groups SET admin_id = ? WHERE group_id = ?", (admin_id, group_id))
+            cursor.execute("UPDATE groups SET admin_id = %s WHERE group_id = %s", (admin_id, group_id))
         
         conn.commit()
         conn.close()
@@ -710,23 +740,23 @@ def remove_group_admin(group_id, admin_id):
     Returns:
         bool: True if admin was removed successfully
     """
-    conn = sqlite3.connect(DB_FILE)
+    conn = _get_db_connection()
     cursor = conn.cursor()
     
     try:
         cursor.execute(
-            "DELETE FROM group_admins WHERE group_id = ? AND admin_id = ?",
+            "DELETE FROM group_admins WHERE group_id = %s AND admin_id = %s",
             (group_id, admin_id)
         )
         
         # Update legacy admin_id if this was the primary admin
-        cursor.execute("SELECT admin_id FROM groups WHERE group_id = ? AND admin_id = ?", (group_id, admin_id))
+        cursor.execute("SELECT admin_id FROM groups WHERE group_id = %s AND admin_id = %s", (group_id, admin_id))
         if cursor.fetchone():
             # Find another admin to set as primary, or set to NULL
-            cursor.execute("SELECT admin_id FROM group_admins WHERE group_id = ? LIMIT 1", (group_id,))
+            cursor.execute("SELECT admin_id FROM group_admins WHERE group_id = %s LIMIT 1", (group_id,))
             new_primary = cursor.fetchone()
             new_admin_id = new_primary[0] if new_primary else None
-            cursor.execute("UPDATE groups SET admin_id = ? WHERE group_id = ?", (new_admin_id, group_id))
+            cursor.execute("UPDATE groups SET admin_id = %s WHERE group_id = %s", (new_admin_id, group_id))
         
         conn.commit()
         conn.close()
@@ -748,12 +778,12 @@ def get_group_admins(group_id):
     Returns:
         list: List of user IDs who are admins of this group
     """
-    conn = sqlite3.connect(DB_FILE)
+    conn = _get_db_connection()
     cursor = conn.cursor()
     
     try:
         cursor.execute(
-            "SELECT admin_id FROM group_admins WHERE group_id = ?",
+            "SELECT admin_id FROM group_admins WHERE group_id = %s",
             (group_id,)
         )
         admins = [row[0] for row in cursor.fetchall()]
@@ -775,7 +805,7 @@ def get_admin_groups(admin_id):
     Returns:
         list: List of group dictionaries
     """
-    conn = sqlite3.connect(DB_FILE)
+    conn = _get_db_connection()
     cursor = conn.cursor()
     
     try:
@@ -783,7 +813,7 @@ def get_admin_groups(admin_id):
             SELECT g.group_id, g.name, g.admin_id
             FROM groups g
             INNER JOIN group_admins ga ON g.group_id = ga.group_id
-            WHERE ga.admin_id = ?
+            WHERE ga.admin_id = %s
             ORDER BY g.name
         ''', (admin_id,))
         
@@ -814,17 +844,17 @@ def is_group_admin(user_id, group_id=None):
     Returns:
         bool: True if user is an admin
     """
-    conn = sqlite3.connect(DB_FILE)
+    conn = _get_db_connection()
     cursor = conn.cursor()
     
     try:
         if group_id is None:
             # Check if admin of any group
-            cursor.execute("SELECT COUNT(*) FROM group_admins WHERE admin_id = ?", (user_id,))
+            cursor.execute("SELECT COUNT(*) FROM group_admins WHERE admin_id = %s", (user_id,))
         else:
             # Check if admin of specific group
             cursor.execute(
-                "SELECT COUNT(*) FROM group_admins WHERE admin_id = ? AND group_id = ?",
+                "SELECT COUNT(*) FROM group_admins WHERE admin_id = %s AND group_id = %s",
                 (user_id, group_id)
             )
         
@@ -857,19 +887,19 @@ def update_group_name(group_id, new_name):
     Returns:
         bool: True if update was successful, False otherwise
     """
-    conn = sqlite3.connect(DB_FILE)
+    conn = _get_db_connection()
     cursor = conn.cursor()
     
     try:
         cursor.execute(
-            "UPDATE groups SET name = ? WHERE group_id = ?",
+            "UPDATE groups SET name = %s WHERE group_id = %s",
             (new_name, group_id)
         )
         conn.commit()
         conn.close()
         logger.info(f"Updated group {group_id} name to '{new_name}'")
         return True
-    except sqlite3.IntegrityError as e:
+    except Exception as e:
         logger.error(f"Error updating group name (likely duplicate): {e}")
         conn.close()
         return False
@@ -889,19 +919,19 @@ def delete_task(task_id):
     Returns:
         bool: True if deletion was successful, False otherwise
     """
-    conn = sqlite3.connect(DB_FILE)
+    conn = _get_db_connection()
     cursor = conn.cursor()
     
     try:
         # First, delete all media files associated with this task
         cursor.execute(
-            "DELETE FROM task_media WHERE task_id = ?",
+            "DELETE FROM task_media WHERE task_id = %s",
             (task_id,)
         )
         
         # Delete the task
         cursor.execute(
-            "DELETE FROM tasks WHERE task_id = ?",
+            "DELETE FROM tasks WHERE task_id = %s",
             (task_id,)
         )
         
@@ -932,25 +962,25 @@ def delete_group(group_id):
     Returns:
         bool: True if deletion was successful, False otherwise
     """
-    conn = sqlite3.connect(DB_FILE)
+    conn = _get_db_connection()
     cursor = conn.cursor()
     
     try:
         # First, unassign all users from this group
         cursor.execute(
-            "UPDATE users SET group_id = NULL WHERE group_id = ?",
+            "UPDATE users SET group_id = NULL WHERE group_id = %s",
             (group_id,)
         )
         
         # Cancel all tasks associated with this group
         cursor.execute(
-            "UPDATE tasks SET status = 'cancelled' WHERE group_id = ?",
+            "UPDATE tasks SET status = 'cancelled' WHERE group_id = %s",
             (group_id,)
         )
         
         # Delete the group
         cursor.execute(
-            "DELETE FROM groups WHERE group_id = ?",
+            "DELETE FROM groups WHERE group_id = %s",
             (group_id,)
         )
         
@@ -976,26 +1006,26 @@ def add_user_to_group(user_id, name, group_id):
     Returns:
         bool: True if added, False if user already exists or group doesn't exist
     """
-    conn = sqlite3.connect(DB_FILE)
+    conn = _get_db_connection()
     cursor = conn.cursor()
     
     try:
         # Check if group exists
-        cursor.execute("SELECT group_id FROM groups WHERE group_id = ?", (group_id,))
+        cursor.execute("SELECT group_id FROM groups WHERE group_id = %s", (group_id,))
         if not cursor.fetchone():
             logger.error(f"Group {group_id} does not exist")
             conn.close()
             return False
         
         # Check if user already exists
-        cursor.execute("SELECT user_id FROM users WHERE user_id = ?", (user_id,))
+        cursor.execute("SELECT user_id FROM users WHERE user_id = %s", (user_id,))
         if cursor.fetchone():
             logger.warning(f"user {user_id} already exists")
             conn.close()
             return False
         
         cursor.execute(
-            "INSERT INTO users (user_id, name, group_id) VALUES (?, ?, ?)",
+            "INSERT INTO users (user_id, name, group_id) VALUES (%s, %s, %s)",
             (user_id, name, group_id)
         )
         conn.commit()
@@ -1010,20 +1040,20 @@ def add_user_to_group(user_id, name, group_id):
 
 def get_group_users(group_id):
     """Get all users in a group (from user_groups many-to-many table)."""
-    conn = sqlite3.connect(DB_FILE)
+    conn = _get_db_connection()
     cursor = conn.cursor()
     
     try:
         # Get users assigned to this group via user_groups table
         cursor.execute(
-            "SELECT u.user_id, u.name FROM users u INNER JOIN user_groups ug ON u.user_id = ug.user_id WHERE ug.group_id = ?",
+            "SELECT u.user_id, u.name FROM users u INNER JOIN user_groups ug ON u.user_id = ug.user_id WHERE ug.group_id = %s",
             (group_id,)
         )
         users_rows = cursor.fetchall()
 
         # Get admins for this group from group_admins (may include users without group_id set)
         cursor.execute(
-            "SELECT u.user_id, u.name FROM users u INNER JOIN group_admins ga ON u.user_id = ga.admin_id WHERE ga.group_id = ?",
+            "SELECT u.user_id, u.name FROM users u INNER JOIN group_admins ga ON u.user_id = ga.admin_id WHERE ga.group_id = %s",
             (group_id,)
         )
         admin_rows = cursor.fetchall()
@@ -1058,12 +1088,12 @@ def register_user(user_id, name, username=None):
     Returns:
         bool: True if registered, False if already exists
     """
-    conn = sqlite3.connect(DB_FILE)
+    conn = _get_db_connection()
     cursor = conn.cursor()
     
     try:
         # Check if user already exists
-        cursor.execute("SELECT user_id FROM users WHERE user_id = ?", (user_id,))
+        cursor.execute("SELECT user_id FROM users WHERE user_id = %s", (user_id,))
         if cursor.fetchone():
             logger.warning(f"user {user_id} already exists")
             conn.close()
@@ -1071,7 +1101,7 @@ def register_user(user_id, name, username=None):
         
         # Create new user without group
         cursor.execute(
-            "INSERT INTO users (user_id, name, username, group_id, registered) VALUES (?, ?, ?, NULL, 1)",
+            "INSERT INTO users (user_id, name, username, group_id, registered) VALUES (%s, %s, %s, NULL, 1)",
             (user_id, name, username)
         )
         conn.commit()
@@ -1086,11 +1116,11 @@ def register_user(user_id, name, username=None):
 
 def is_user_registered(user_id):
     """Check if a user has registered (via password)."""
-    conn = sqlite3.connect(DB_FILE)
+    conn = _get_db_connection()
     cursor = conn.cursor()
     
     try:
-        cursor.execute("SELECT registered FROM users WHERE user_id = ?", (user_id,))
+        cursor.execute("SELECT registered FROM users WHERE user_id = %s", (user_id,))
         row = cursor.fetchone()
         conn.close()
         return row[0] == 1 if row else False
@@ -1102,10 +1132,10 @@ def is_user_registered(user_id):
 
 def has_user_group(user_id):
     """Check if user is assigned to any group (using user_groups table)."""
-    conn = sqlite3.connect(DB_FILE)
+    conn = _get_db_connection()
     cursor = conn.cursor()
     try:
-        cursor.execute("SELECT COUNT(*) FROM user_groups WHERE user_id = ?", (user_id,))
+        cursor.execute("SELECT COUNT(*) FROM user_groups WHERE user_id = %s", (user_id,))
         count = cursor.fetchone()[0]
         conn.close()
         return count > 0
@@ -1117,16 +1147,15 @@ def has_user_group(user_id):
 
 def add_user_to_group(user_id, group_id):
     """Add a user to a group (many-to-many relationship)."""
-    conn = sqlite3.connect(DB_FILE)
+    conn = _get_db_connection()
     cursor = conn.cursor()
     try:
         cursor.execute(
-            "INSERT OR IGNORE INTO user_groups (user_id, group_id) VALUES (?, ?)",
+            "INSERT INTO user_groups (user_id, group_id) VALUES (%s, %s)",
             (user_id, group_id)
         )
-        conn.commit()
-        conn.close()
         logger.info(f"Added user {user_id} to group {group_id}")
+        conn.close()
         return True
     except Exception as e:
         logger.error(f"Error adding user to group: {e}")
@@ -1136,11 +1165,11 @@ def add_user_to_group(user_id, group_id):
 
 def remove_user_from_group(user_id, group_id):
     """Remove a user from a group (many-to-many relationship)."""
-    conn = sqlite3.connect(DB_FILE)
+    conn = _get_db_connection()
     cursor = conn.cursor()
     try:
         cursor.execute(
-            "DELETE FROM user_groups WHERE user_id = ? AND group_id = ?",
+            "DELETE FROM user_groups WHERE user_id = %s AND group_id = %s",
             (user_id, group_id)
         )
         conn.commit()
@@ -1155,11 +1184,11 @@ def remove_user_from_group(user_id, group_id):
 
 def get_user_groups(user_id):
     """Get all groups a user belongs to."""
-    conn = sqlite3.connect(DB_FILE)
+    conn = _get_db_connection()
     cursor = conn.cursor()
     try:
         cursor.execute(
-            "SELECT g.group_id, g.name FROM groups g INNER JOIN user_groups ug ON g.group_id = ug.group_id WHERE ug.user_id = ?",
+            "SELECT g.group_id, g.name FROM groups g INNER JOIN user_groups ug ON g.group_id = ug.group_id WHERE ug.user_id = %s",
             (user_id,)
         )
         rows = cursor.fetchall()
@@ -1184,8 +1213,7 @@ def get_users_for_task_assignment(creator_id, creator_is_super_admin, creator_is
     Returns:
         List of users with user_id, name, group_id, group_name, username
     """
-    conn = sqlite3.connect(DB_FILE)
-    conn.row_factory = sqlite3.Row
+    conn = _get_db_connection()
     cursor = conn.cursor()
     
     try:
@@ -1193,8 +1221,8 @@ def get_users_for_task_assignment(creator_id, creator_is_super_admin, creator_is
             # Super admin can assign to anyone including group admins - get ALL groups user belongs to
             cursor.execute("""
                 SELECT DISTINCT u.user_id, u.name, u.username,
-                       GROUP_CONCAT(DISTINCT g.group_id) as group_ids,
-                       GROUP_CONCAT(DISTINCT g.name) as group_names
+                       STRING_AGG(DISTINCT g.group_id::text, ',') as group_ids,
+                       STRING_AGG(DISTINCT g.name, ',') as group_names
                 FROM users u
                 LEFT JOIN user_groups ug ON u.user_id = ug.user_id
                 LEFT JOIN groups g ON ug.group_id = g.group_id
@@ -1207,14 +1235,14 @@ def get_users_for_task_assignment(creator_id, creator_is_super_admin, creator_is
             group_ids_str = ','.join(str(gid) for gid in creator_admin_groups)
             query = f"""
                 SELECT DISTINCT u.user_id, u.name, u.username,
-                       GROUP_CONCAT(DISTINCT g.group_id) as group_ids,
-                       GROUP_CONCAT(DISTINCT g.name) as group_names
+                       STRING_AGG(DISTINCT g.group_id::text, ',') as group_ids,
+                       STRING_AGG(DISTINCT g.name, ',') as group_names
                 FROM users u
                 LEFT JOIN user_groups ug ON u.user_id = ug.user_id
                 LEFT JOIN groups g ON ug.group_id = g.group_id
                 WHERE u.banned = 0 AND u.deleted = 0 AND (
                     ug.group_id IN ({group_ids_str})
-                    OR u.user_id = ?
+                    OR u.user_id = %s
                 )
                 GROUP BY u.user_id, u.name, u.username
                 ORDER BY u.name
@@ -1224,20 +1252,20 @@ def get_users_for_task_assignment(creator_id, creator_is_super_admin, creator_is
             # Regular worker: users from worker's OWN groups + admins of those groups + ALWAYS include self
             cursor.execute("""
                 SELECT DISTINCT u.user_id, u.name, u.username,
-                       GROUP_CONCAT(DISTINCT g.group_id) as group_ids,
-                       GROUP_CONCAT(DISTINCT g.name) as group_names
+                       STRING_AGG(DISTINCT g.group_id::text, ',') as group_ids,
+                       STRING_AGG(DISTINCT g.name, ',') as group_names
                 FROM users u
                 LEFT JOIN user_groups ug ON u.user_id = ug.user_id
                 LEFT JOIN groups g ON ug.group_id = g.group_id
                 WHERE u.banned = 0 AND u.deleted = 0 AND (
-                    u.user_id = ?
+                    u.user_id = %s
                     OR ug.group_id IN (
-                        SELECT ug2.group_id FROM user_groups ug2 WHERE ug2.user_id = ?
+                        SELECT ug2.group_id FROM user_groups ug2 WHERE ug2.user_id = %s
                     )
                     OR u.user_id IN (
                         SELECT ga.admin_id FROM group_admins ga
                         WHERE ga.group_id IN (
-                            SELECT ug3.group_id FROM user_groups ug3 WHERE ug3.user_id = ?
+                            SELECT ug3.group_id FROM user_groups ug3 WHERE ug3.user_id = %s
                         )
                     )
                 )
@@ -1249,17 +1277,17 @@ def get_users_for_task_assignment(creator_id, creator_is_super_admin, creator_is
         users = []
         for row in rows:
             # Parse group_ids and group_names
-            group_ids_str = row["group_ids"] if row["group_ids"] else ""
-            group_names_str = row["group_names"] if row["group_names"] else ""
+            group_ids_str = row[3] if row[3] else ""
+            group_names_str = row[4] if row[4] else ""
             
             # Get first group (for backwards compatibility)
             group_id = int(group_ids_str.split(',')[0]) if group_ids_str else None
             group_name = group_names_str.split(',')[0] if group_names_str else None
             
             users.append({
-                "user_id": row["user_id"],
-                "name": row["name"],
-                "username": row["username"],
+                "user_id": row[0],
+                "name": row[1],
+                "username": row[2],
                 "group_id": group_id,
                 "group_name": group_name,
                 "all_groups": group_names_str  # All groups comma-separated
@@ -1285,8 +1313,7 @@ def reassign_user_tasks_to_group(user_id, new_group_id):
         int: number of tasks updated
     """
     import json
-    conn = sqlite3.connect(DB_FILE)
-    conn.row_factory = sqlite3.Row
+    conn = _get_db_connection()
     cursor = conn.cursor()
     try:
         # Find tasks where assigned_to_list contains this user
@@ -1294,13 +1321,13 @@ def reassign_user_tasks_to_group(user_id, new_group_id):
         rows = cursor.fetchall()
         updated = 0
         for row in rows:
-            assigned_json = row["assigned_to_list"]
+            assigned_json = row[1]
             try:
                 assigned = json.loads(assigned_json or '[]')
             except Exception:
                 assigned = []
             if user_id in assigned:
-                cursor.execute("UPDATE tasks SET group_id = ? WHERE task_id = ?", (new_group_id, row["task_id"]))
+                cursor.execute("UPDATE tasks SET group_id = %s WHERE task_id = %s", (new_group_id, row[0]))
                 updated += 1
 
         conn.commit()
@@ -1315,10 +1342,10 @@ def reassign_user_tasks_to_group(user_id, new_group_id):
 
 def set_user_name(user_id, new_name):
     """Set a user's display name (name)."""
-    conn = sqlite3.connect(DB_FILE)
+    conn = _get_db_connection()
     cursor = conn.cursor()
     try:
-        cursor.execute("UPDATE users SET name = ? WHERE user_id = ?", (new_name, user_id))
+        cursor.execute("UPDATE users SET name = %s WHERE user_id = %s", (new_name, user_id))
         conn.commit()
         conn.close()
         logger.info(f"Set user {user_id} name -> {new_name}")
@@ -1331,15 +1358,15 @@ def set_user_name(user_id, new_name):
 
 def ban_user(user_id):
     """Ban a user (set banned flag and remove from admin positions)."""
-    conn = sqlite3.connect(DB_FILE)
+    conn = _get_db_connection()
     cursor = conn.cursor()
     try:
         # Set user as banned
-        cursor.execute("UPDATE users SET banned = 1 WHERE user_id = ?", (user_id,))
+        cursor.execute("UPDATE users SET banned = 1 WHERE user_id = %s", (user_id,))
         # Remove from group_admins (many-to-many admin table)
-        cursor.execute("DELETE FROM group_admins WHERE admin_id = ?", (user_id,))
+        cursor.execute("DELETE FROM group_admins WHERE admin_id = %s", (user_id,))
         # Update groups.admin_id to NULL if this user is primary admin
-        cursor.execute("UPDATE groups SET admin_id = NULL WHERE admin_id = ?", (user_id,))
+        cursor.execute("UPDATE groups SET admin_id = NULL WHERE admin_id = %s", (user_id,))
         conn.commit()
         conn.close()
         logger.info(f"Banned user {user_id} and removed from admin positions")
@@ -1352,10 +1379,10 @@ def ban_user(user_id):
 
 def unban_user(user_id):
     """Unban a user (remove banned flag)."""
-    conn = sqlite3.connect(DB_FILE)
+    conn = _get_db_connection()
     cursor = conn.cursor()
     try:
-        cursor.execute("UPDATE users SET banned = 0 WHERE user_id = ?", (user_id,))
+        cursor.execute("UPDATE users SET banned = 0 WHERE user_id = %s", (user_id,))
         conn.commit()
         conn.close()
         logger.info(f"Unbanned user {user_id}")
@@ -1368,10 +1395,10 @@ def unban_user(user_id):
 
 def remove_user_from_all_groups(user_id):
     """Remove user from all groups (when banning)."""
-    conn = sqlite3.connect(DB_FILE)
+    conn = _get_db_connection()
     cursor = conn.cursor()
     try:
-        cursor.execute("DELETE FROM user_groups WHERE user_id = ?", (user_id,))
+        cursor.execute("DELETE FROM user_groups WHERE user_id = %s", (user_id,))
         conn.commit()
         conn.close()
         logger.info(f"Removed user {user_id} from all groups")
@@ -1384,17 +1411,17 @@ def remove_user_from_all_groups(user_id):
 
 def delete_user(user_id):
     """Delete a user from the system (bans them and hides from lists)."""
-    conn = sqlite3.connect(DB_FILE)
+    conn = _get_db_connection()
     cursor = conn.cursor()
     try:
         # Set user as banned and deleted (deleted users don't show in lists)
-        cursor.execute("UPDATE users SET banned = 1, deleted = 1 WHERE user_id = ?", (user_id,))
+        cursor.execute("UPDATE users SET banned = 1, deleted = 1 WHERE user_id = %s", (user_id,))
         # Remove from all groups
-        cursor.execute("DELETE FROM user_groups WHERE user_id = ?", (user_id,))
+        cursor.execute("DELETE FROM user_groups WHERE user_id = %s", (user_id,))
         # Remove from group_admins (many-to-many admin table)
-        cursor.execute("DELETE FROM group_admins WHERE admin_id = ?", (user_id,))
+        cursor.execute("DELETE FROM group_admins WHERE admin_id = %s", (user_id,))
         # Update groups.admin_id to NULL if this user is primary admin
-        cursor.execute("UPDATE groups SET admin_id = NULL WHERE admin_id = ?", (user_id,))
+        cursor.execute("UPDATE groups SET admin_id = NULL WHERE admin_id = %s", (user_id,))
         conn.commit()
         conn.close()
         logger.info(f"Deleted user {user_id} and removed from admin positions")
@@ -1416,8 +1443,7 @@ def cancel_user_tasks(user_id):
         dict with counts of cancelled and updated tasks
     """
     import json
-    conn = sqlite3.connect(DB_FILE)
-    conn.row_factory = sqlite3.Row
+    conn = _get_db_connection()
     cursor = conn.cursor()
     
     try:
@@ -1425,12 +1451,12 @@ def cancel_user_tasks(user_id):
         updated_count = 0
         
         # Get all tasks where user is creator
-        cursor.execute("SELECT task_id FROM tasks WHERE created_by = ? AND status != 'cancelled'", (user_id,))
-        creator_tasks = [row['task_id'] for row in cursor.fetchall()]
+        cursor.execute("SELECT task_id FROM tasks WHERE created_by = %s AND status != 'cancelled'", (user_id,))
+        creator_tasks = [row[0] for row in cursor.fetchall()]
         
         # Cancel tasks where user is creator
         if creator_tasks:
-            placeholders = ','.join('?' * len(creator_tasks))
+            placeholders = ','.join('%s' * len(creator_tasks))
             cursor.execute(f"UPDATE tasks SET status = 'cancelled' WHERE task_id IN ({placeholders})", creator_tasks)
             cancelled_count += len(creator_tasks)
         
@@ -1444,12 +1470,12 @@ def cancel_user_tasks(user_id):
                 if user_id in assigned:
                     if len(assigned) == 1:
                         # User is sole assignee - cancel task
-                        cursor.execute("UPDATE tasks SET status = 'cancelled' WHERE task_id = ?", (task['task_id'],))
+                        cursor.execute("UPDATE tasks SET status = 'cancelled' WHERE task_id = %s", (task['task_id'],))
                         cancelled_count += 1
                     else:
                         # User is co-assignee - remove from list
                         assigned.remove(user_id)
-                        cursor.execute("UPDATE tasks SET assigned_to_list = ? WHERE task_id = ?", 
+                        cursor.execute("UPDATE tasks SET assigned_to_list = %s WHERE task_id = %s", 
                                      (json.dumps(assigned), task['task_id']))
                         updated_count += 1
             except Exception as e:
@@ -1470,7 +1496,7 @@ def cancel_user_tasks(user_id):
 # Task Management Functions (Updated for Groups and Media)
 # ============================================================================
 
-def create_task(date, time, description, group_id, admin_id, assigned_to_list=None):
+def create_task(date, time, description, group_id, admin_id, assigned_to_list=None, title=None):
     """
     Create a new task for a group.
     
@@ -1481,36 +1507,46 @@ def create_task(date, time, description, group_id, admin_id, assigned_to_list=No
         group_id (int): ID of the group
         admin_id (int): ID of admin creating the task
         assigned_to_list (list): List of user IDs to assign (optional)
+        title (str): Task title/name (optional)
         
     Returns:
         int: ID of created task, or None if failed
     """
     import json
     
-    conn = sqlite3.connect(DB_FILE)
+    # Ensure admin_id exists in users table (for super admins who may not be registered)
+    if not user_exists(admin_id):
+        add_user(admin_id, f"User_{admin_id}", None)
+    
+    conn = _get_db_connection()
     cursor = conn.cursor()
     
     try:
         assigned_to_json = json.dumps(assigned_to_list) if assigned_to_list else None
         
         cursor.execute(
-            """INSERT INTO tasks (date, time, description, group_id, 
+            """INSERT INTO tasks (title, date, time, description, group_id, 
                assigned_to_list, created_by, status) 
-               VALUES (?, ?, ?, ?, ?, ?, 'pending')""",
-            (date, time, description, group_id, assigned_to_json, admin_id)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, 'pending') RETURNING task_id""",
+            (title, date, time, description, group_id, assigned_to_json, admin_id)
         )
-        task_id = cursor.lastrowid
+        task_id = cursor.fetchone()[0]
         
         # Log task creation
         cursor.execute(
             """INSERT INTO task_history (task_id, action, new_value, changed_by) 
-               VALUES (?, 'created', ?, ?)""",
+               VALUES (%s, 'created', %s, %s)""",
             (task_id, f"Task created: {description}", admin_id)
         )
         
         conn.commit()
         conn.close()
         logger.info(f"Created task {task_id} for group {group_id}")
+        
+        # Add assignees to task_assignees table with 'pending' status
+        if assigned_to_list:
+            add_task_assignees(task_id, assigned_to_list, initial_status='pending')
+        
         return task_id
     except Exception as e:
         logger.error(f"Error creating task: {e}")
@@ -1520,18 +1556,29 @@ def create_task(date, time, description, group_id, admin_id, assigned_to_list=No
 
 def get_group_tasks(group_id):
     """Get all tasks for a group."""
-    conn = sqlite3.connect(DB_FILE)
-    conn.row_factory = sqlite3.Row
+    conn = _get_db_connection()
     cursor = conn.cursor()
     
     try:
         cursor.execute(
             """SELECT task_id, date, time, description, group_id, assigned_to_list, 
                       status, has_media, created_at 
-               FROM tasks WHERE group_id = ? ORDER BY created_at DESC""",
+               FROM tasks WHERE group_id = %s ORDER BY created_at DESC""",
             (group_id,)
         )
-        tasks = [dict(row) for row in cursor.fetchall()]
+        tasks = []
+        for row in cursor.fetchall():
+            tasks.append({
+                "task_id": row[0],
+                "date": row[1],
+                "time": row[2],
+                "description": row[3],
+                "group_id": row[4],
+                "assigned_to_list": row[5],
+                "status": row[6],
+                "has_media": row[7],
+                "created_at": row[8]
+            })
         conn.close()
         return tasks
     except Exception as e:
@@ -1544,8 +1591,7 @@ def get_user_tasks(user_id):
     """Get all active tasks assigned to a user (as executor), excluding completed."""
     import json
     
-    conn = sqlite3.connect(DB_FILE)
-    conn.row_factory = sqlite3.Row
+    conn = _get_db_connection()
     cursor = conn.cursor()
     
     try:
@@ -1556,7 +1602,18 @@ def get_user_tasks(user_id):
         )
         tasks = []
         for row in cursor.fetchall():
-            task = dict(row)
+            task = {
+                "task_id": row[0],
+                "date": row[1],
+                "time": row[2],
+                "description": row[3],
+                "group_id": row[4],
+                "assigned_to_list": row[5],
+                "status": row[6],
+                "has_media": row[7],
+                "created_at": row[8],
+                "created_by": row[9]
+            }
             assigned_list = json.loads(task.get('assigned_to_list') or '[]')
             if user_id in assigned_list:
                 tasks.append(task)
@@ -1570,19 +1627,31 @@ def get_user_tasks(user_id):
 
 def get_tasks_created_by_user(user_id):
     """Get all active tasks created by a user (as постановник), excluding completed."""
-    conn = sqlite3.connect(DB_FILE)
-    conn.row_factory = sqlite3.Row
+    conn = _get_db_connection()
     cursor = conn.cursor()
     
     try:
         cursor.execute(
             """SELECT task_id, date, time, description, group_id, assigned_to_list, 
                       status, has_media, created_at, created_by
-               FROM tasks WHERE created_by = ? AND status NOT IN ('cancelled', 'completed') 
+               FROM tasks WHERE created_by = %s AND status NOT IN ('cancelled', 'completed') 
                ORDER BY created_at DESC""",
             (user_id,)
         )
-        tasks = [dict(row) for row in cursor.fetchall()]
+        tasks = []
+        for row in cursor.fetchall():
+            tasks.append({
+                "task_id": row[0],
+                "date": row[1],
+                "time": row[2],
+                "description": row[3],
+                "group_id": row[4],
+                "assigned_to_list": row[5],
+                "status": row[6],
+                "has_media": row[7],
+                "created_at": row[8],
+                "created_by": row[9]
+            })
         conn.close()
         return tasks
     except Exception as e:
@@ -1595,8 +1664,7 @@ def get_user_archived_tasks(user_id):
     """Get all completed tasks assigned to a user (archived)."""
     import json
     
-    conn = sqlite3.connect(DB_FILE)
-    conn.row_factory = sqlite3.Row
+    conn = _get_db_connection()
     cursor = conn.cursor()
     
     try:
@@ -1607,7 +1675,19 @@ def get_user_archived_tasks(user_id):
         )
         tasks = []
         for row in cursor.fetchall():
-            task = dict(row)
+            task = {
+                'task_id': row[0],
+                'date': row[1],
+                'time': row[2],
+                'description': row[3],
+                'group_id': row[4],
+                'assigned_to_list': row[5],
+                'status': row[6],
+                'has_media': row[7],
+                'created_at': row[8],
+                'created_by': row[9],
+                'updated_at': row[10]
+            }
             assigned_list = json.loads(task.get('assigned_to_list') or '[]')
             if user_id in assigned_list:
                 tasks.append(task)
@@ -1621,19 +1701,32 @@ def get_user_archived_tasks(user_id):
 
 def get_archived_tasks_created_by_user(user_id):
     """Get all completed tasks created by a user (archived)."""
-    conn = sqlite3.connect(DB_FILE)
-    conn.row_factory = sqlite3.Row
+    conn = _get_db_connection()
     cursor = conn.cursor()
     
     try:
         cursor.execute(
             """SELECT task_id, date, time, description, group_id, assigned_to_list, 
                       status, has_media, created_at, created_by, updated_at
-               FROM tasks WHERE created_by = ? AND status = 'completed' 
+               FROM tasks WHERE created_by = %s AND status = 'completed' 
                ORDER BY updated_at DESC""",
             (user_id,)
         )
-        tasks = [dict(row) for row in cursor.fetchall()]
+        tasks = []
+        for row in cursor.fetchall():
+            tasks.append({
+                'task_id': row[0],
+                'date': row[1],
+                'time': row[2],
+                'description': row[3],
+                'group_id': row[4],
+                'assigned_to_list': row[5],
+                'status': row[6],
+                'has_media': row[7],
+                'created_at': row[8],
+                'created_by': row[9],
+                'updated_at': row[10]
+            })
         conn.close()
         return tasks
     except Exception as e:
@@ -1644,8 +1737,7 @@ def get_archived_tasks_created_by_user(user_id):
 
 def get_all_tasks():
     """Get all tasks (for super admin)."""
-    conn = sqlite3.connect(DB_FILE)
-    conn.row_factory = sqlite3.Row
+    conn = _get_db_connection()
     cursor = conn.cursor()
     
     try:
@@ -1654,7 +1746,20 @@ def get_all_tasks():
                       status, has_media, created_at, created_by
                FROM tasks WHERE status != 'cancelled' ORDER BY created_at DESC"""
         )
-        tasks = [dict(row) for row in cursor.fetchall()]
+        tasks = []
+        for row in cursor.fetchall():
+            tasks.append({
+                'task_id': row[0],
+                'date': row[1],
+                'time': row[2],
+                'description': row[3],
+                'group_id': row[4],
+                'assigned_to_list': row[5],
+                'status': row[6],
+                'has_media': row[7],
+                'created_at': row[8],
+                'created_by': row[9]
+            })
         conn.close()
         return tasks
     except Exception as e:
@@ -1668,18 +1773,30 @@ def get_multiple_groups_tasks(group_ids):
     if not group_ids:
         return []
         
-    conn = sqlite3.connect(DB_FILE)
-    conn.row_factory = sqlite3.Row
+    conn = _get_db_connection()
     cursor = conn.cursor()
     
     try:
-        placeholders = ','.join('?' * len(group_ids))
+        placeholders = ','.join('%s' * len(group_ids))
         query = f"""SELECT task_id, date, time, description, group_id, assigned_to_list, 
                            status, has_media, created_at, created_by
                     FROM tasks WHERE group_id IN ({placeholders}) AND status != 'cancelled' 
                     ORDER BY created_at DESC"""
         cursor.execute(query, group_ids)
-        tasks = [dict(row) for row in cursor.fetchall()]
+        tasks = []
+        for row in cursor.fetchall():
+            tasks.append({
+                'task_id': row[0],
+                'date': row[1],
+                'time': row[2],
+                'description': row[3],
+                'group_id': row[4],
+                'assigned_to_list': row[5],
+                'status': row[6],
+                'has_media': row[7],
+                'created_at': row[8],
+                'created_by': row[9]
+            })
         conn.close()
         return tasks
     except Exception as e:
@@ -1699,12 +1816,12 @@ def update_task_status(task_id, new_status):
     Returns:
         bool: True if successful
     """
-    conn = sqlite3.connect(DB_FILE)
+    conn = _get_db_connection()
     cursor = conn.cursor()
     
     try:
         cursor.execute(
-            "UPDATE tasks SET status = ? WHERE task_id = ?",
+            "UPDATE tasks SET status = %s WHERE task_id = %s",
             (new_status, task_id)
         )
         
@@ -1731,14 +1848,14 @@ def update_task_assignment(task_id, assigned_to_list):
     """
     import json
     
-    conn = sqlite3.connect(DB_FILE)
+    conn = _get_db_connection()
     cursor = conn.cursor()
     
     try:
         assigned_to_json = json.dumps(assigned_to_list)
         cursor.execute(
-            """UPDATE tasks SET assigned_to_list = ?, updated_at = CURRENT_TIMESTAMP 
-               WHERE task_id = ?""",
+            """UPDATE tasks SET assigned_to_list = %s, updated_at = CURRENT_TIMESTAMP 
+               WHERE task_id = %s""",
             (assigned_to_json, task_id)
         )
         rows_updated = cursor.rowcount
@@ -1757,22 +1874,78 @@ def update_task_assignment(task_id, assigned_to_list):
         return False
 
 
+def update_task_field(task_id, field_name, value):
+    """
+    Update a specific field in a task.
+    
+    Args:
+        task_id (int): ID of the task
+        field_name (str): Name of the field to update (description, assigned_to_list, etc.)
+        value: New value for the field
+        
+    Returns:
+        bool: True if successful
+    """
+    conn = _get_db_connection()
+    cursor = conn.cursor()
+    
+    try:
+        # Allowed fields to prevent SQL injection
+        allowed_fields = ['title', 'description', 'assigned_to_list', 'date', 'time', 'has_media', 'group_id']
+        
+        if field_name not in allowed_fields:
+            logger.warning(f"Attempted to update disallowed field: {field_name}")
+            conn.close()
+            return False
+        
+        query = f"UPDATE tasks SET {field_name} = %s, updated_at = CURRENT_TIMESTAMP WHERE task_id = %s"
+        cursor.execute(query, (value, task_id))
+        
+        rows_updated = cursor.rowcount
+        conn.commit()
+        conn.close()
+        
+        if rows_updated > 0:
+            logger.info(f"Updated task {task_id} field {field_name}")
+            return True
+        else:
+            logger.warning(f"Task {task_id} not found for field update")
+            return False
+    except Exception as e:
+        logger.error(f"Error updating task field {field_name}: {e}")
+        conn.close()
+        return False
+
+
 def get_task_by_id(task_id):
     """Get task information by ID."""
-    conn = sqlite3.connect(DB_FILE)
-    conn.row_factory = sqlite3.Row
+    conn = _get_db_connection()
     cursor = conn.cursor()
     
     try:
         cursor.execute(
-            """SELECT task_id, date, time, description, group_id, 
+            """SELECT task_id, title, date, time, description, group_id, 
                       assigned_to_list, status, has_media, created_by, created_at 
-               FROM tasks WHERE task_id = ?""",
+               FROM tasks WHERE task_id = %s""",
             (task_id,)
         )
         row = cursor.fetchone()
         conn.close()
-        return dict(row) if row else None
+        if row:
+            return {
+                "task_id": row[0],
+                "title": row[1],
+                "date": row[2],
+                "time": row[3],
+                "description": row[4],
+                "group_id": row[5],
+                "assigned_to_list": row[6],
+                "status": row[7],
+                "has_media": row[8],
+                "created_by": row[9],
+                "created_at": row[10]
+            }
+        return None
     except Exception as e:
         logger.error(f"Error getting task: {e}")
         conn.close()
@@ -1797,12 +1970,12 @@ def add_task_media(task_id, file_id, file_type, file_name=None, file_size=None):
     Returns:
         int: ID of media record, or None if failed
     """
-    conn = sqlite3.connect(DB_FILE)
+    conn = _get_db_connection()
     cursor = conn.cursor()
     
     try:
         # Check media count for this task (max 20)
-        cursor.execute("SELECT COUNT(*) FROM task_media WHERE task_id = ?", (task_id,))
+        cursor.execute("SELECT COUNT(*) FROM task_media WHERE task_id = %s", (task_id,))
         media_count = cursor.fetchone()[0]
         
         if media_count >= 20:
@@ -1812,14 +1985,14 @@ def add_task_media(task_id, file_id, file_type, file_name=None, file_size=None):
         
         cursor.execute(
             """INSERT INTO task_media (task_id, file_id, file_type, file_name, file_size) 
-               VALUES (?, ?, ?, ?, ?)""",
+               VALUES (%s, %s, %s, %s, %s) RETURNING media_id""",
             (task_id, file_id, file_type, file_name, file_size)
         )
-        media_id = cursor.lastrowid
+        media_id = cursor.fetchone()[0]
         
         # Update task has_media flag
         cursor.execute(
-            "UPDATE tasks SET has_media = 1 WHERE task_id = ?",
+            "UPDATE tasks SET has_media = 1 WHERE task_id = %s",
             (task_id,)
         )
         
@@ -1835,17 +2008,25 @@ def add_task_media(task_id, file_id, file_type, file_name=None, file_size=None):
 
 def get_task_media(task_id):
     """Get all media files for a task."""
-    conn = sqlite3.connect(DB_FILE)
-    conn.row_factory = sqlite3.Row
+    conn = _get_db_connection()
     cursor = conn.cursor()
     
     try:
         cursor.execute(
             """SELECT media_id, file_id, file_type, file_name, file_size, added_at 
-               FROM task_media WHERE task_id = ? ORDER BY added_at""",
+               FROM task_media WHERE task_id = %s ORDER BY added_at""",
             (task_id,)
         )
-        media = [dict(row) for row in cursor.fetchall()]
+        media = []
+        for row in cursor.fetchall():
+            media.append({
+                'media_id': row[0],
+                'file_id': row[1],
+                'file_type': row[2],
+                'file_name': row[3],
+                'file_size': row[4],
+                'added_at': row[5]
+            })
         conn.close()
         return media
     except Exception as e:
@@ -1856,11 +2037,11 @@ def get_task_media(task_id):
 
 def remove_task_media(media_id):
     """Remove a media file from a task."""
-    conn = sqlite3.connect(DB_FILE)
+    conn = _get_db_connection()
     cursor = conn.cursor()
     
     try:
-        cursor.execute("SELECT task_id FROM task_media WHERE media_id = ?", (media_id,))
+        cursor.execute("SELECT task_id FROM task_media WHERE media_id = %s", (media_id,))
         row = cursor.fetchone()
         
         if not row:
@@ -1869,12 +2050,12 @@ def remove_task_media(media_id):
         
         task_id = row[0]
         
-        cursor.execute("DELETE FROM task_media WHERE media_id = ?", (media_id,))
+        cursor.execute("DELETE FROM task_media WHERE media_id = %s", (media_id,))
         
         # If no more media, update has_media flag
-        cursor.execute("SELECT COUNT(*) FROM task_media WHERE task_id = ?", (task_id,))
+        cursor.execute("SELECT COUNT(*) FROM task_media WHERE task_id = %s", (task_id,))
         if cursor.fetchone()[0] == 0:
-            cursor.execute("UPDATE tasks SET has_media = 0 WHERE task_id = ?", (task_id,))
+            cursor.execute("UPDATE tasks SET has_media = 0 WHERE task_id = %s", (task_id,))
         
         conn.commit()
         conn.close()
@@ -1888,55 +2069,70 @@ def remove_task_media(media_id):
 
 def create_registration_request(user_id, name, username=None):
     """Create a new registration request."""
+    conn = None
     try:
-        conn = sqlite3.connect(DB_FILE)
+        conn = _get_db_connection()
         cursor = conn.cursor()
         cursor.execute('''
             INSERT INTO registration_requests (user_id, name, username, status)
-            VALUES (?, ?, ?, 'pending')
+            VALUES (%s, %s, %s, 'pending')
         ''', (user_id, name, username))
         conn.commit()
-        conn.close()
         logger.info(f"Registration request created for user {user_id}")
         return True
-    except sqlite3.IntegrityError:
-        logger.warning(f"Registration request already exists for user {user_id}")
-        conn.close()
-        return False
     except Exception as e:
-        logger.error(f"Error creating registration request: {e}")
-        conn.close()
+        error_msg = str(e)
+        if "unique constraint" in error_msg.lower():
+            logger.warning(f"Registration request already exists for user {user_id}")
+        else:
+            logger.error(f"Error creating registration request: {e}")
         return False
+    finally:
+        if conn:
+            conn.close()
 
 
 def get_pending_registration_requests():
     """Get all pending registration requests."""
     try:
-        conn = sqlite3.connect(DB_FILE)
-        conn.row_factory = sqlite3.Row
+        conn = _get_db_connection()
         cursor = conn.cursor()
         cursor.execute('''
-            SELECT * FROM registration_requests 
+            SELECT request_id, user_id, name, username, status, requested_at, reviewed_by, reviewed_at
+            FROM registration_requests 
             WHERE status = 'pending' 
             ORDER BY requested_at DESC
         ''')
-        requests = [dict(row) for row in cursor.fetchall()]
+        rows = cursor.fetchall()
+        requests = []
+        for row in rows:
+            requests.append({
+                'request_id': row[0],
+                'user_id': row[1],
+                'name': row[2],
+                'username': row[3],
+                'status': row[4],
+                'requested_at': row[5],
+                'reviewed_by': row[6],
+                'reviewed_at': row[7]
+            })
         conn.close()
         return requests
     except Exception as e:
         logger.error(f"Error getting registration requests: {e}")
-        conn.close()
+        if conn:
+            conn.close()
         return []
 
 
 def approve_registration_request(request_id, reviewer_id):
     """Approve a registration request and create user."""
     try:
-        conn = sqlite3.connect(DB_FILE)
+        conn = _get_db_connection()
         cursor = conn.cursor()
         
         # Get request details
-        cursor.execute("SELECT user_id, name FROM registration_requests WHERE request_id = ?", (request_id,))
+        cursor.execute("SELECT user_id, name FROM registration_requests WHERE request_id = %s", (request_id,))
         row = cursor.fetchone()
         if not row:
             conn.close()
@@ -1945,21 +2141,21 @@ def approve_registration_request(request_id, reviewer_id):
         user_id, name = row
         
         # Get username from request
-        cursor.execute("SELECT username FROM registration_requests WHERE request_id = ?", (request_id,))
+        cursor.execute("SELECT username FROM registration_requests WHERE request_id = %s", (request_id,))
         username_row = cursor.fetchone()
         username = username_row[0] if username_row else None
         
         # Update request status
         cursor.execute('''
             UPDATE registration_requests 
-            SET status = 'approved', reviewed_by = ?, reviewed_at = CURRENT_TIMESTAMP
-            WHERE request_id = ?
+            SET status = 'approved', reviewed_by = %s, reviewed_at = CURRENT_TIMESTAMP
+            WHERE request_id = %s
         ''', (reviewer_id, request_id))
         
         # Create user in users table with username
         cursor.execute('''
-            INSERT OR IGNORE INTO users (user_id, name, username, registered)
-            VALUES (?, ?, ?, 1)
+            INSERT INTO users (user_id, name, username, registered)
+            VALUES (%s, %s, %s, 1)
         ''', (user_id, name, username))
         
         conn.commit()
@@ -1975,12 +2171,12 @@ def approve_registration_request(request_id, reviewer_id):
 def reject_registration_request(request_id, reviewer_id):
     """Reject a registration request."""
     try:
-        conn = sqlite3.connect(DB_FILE)
+        conn = _get_db_connection()
         cursor = conn.cursor()
         cursor.execute('''
             UPDATE registration_requests 
-            SET status = 'rejected', reviewed_by = ?, reviewed_at = CURRENT_TIMESTAMP
-            WHERE request_id = ?
+            SET status = 'rejected', reviewed_by = %s, reviewed_at = CURRENT_TIMESTAMP
+            WHERE request_id = %s
         ''', (reviewer_id, request_id))
         conn.commit()
         conn.close()
@@ -1995,19 +2191,292 @@ def reject_registration_request(request_id, reviewer_id):
 def get_registration_request_by_user_id(user_id):
     """Get registration request for a specific user."""
     try:
-        conn = sqlite3.connect(DB_FILE)
-        conn.row_factory = sqlite3.Row
+        conn = _get_db_connection()
         cursor = conn.cursor()
         cursor.execute('''
-            SELECT * FROM registration_requests 
-            WHERE user_id = ? 
+            SELECT request_id, user_id, name, username, status, requested_at, reviewed_by, reviewed_at
+            FROM registration_requests 
+            WHERE user_id = %s 
             ORDER BY requested_at DESC 
             LIMIT 1
         ''', (user_id,))
         row = cursor.fetchone()
         conn.close()
-        return dict(row) if row else None
+        
+        if row:
+            return {
+                'request_id': row[0],
+                'user_id': row[1],
+                'name': row[2],
+                'username': row[3],
+                'status': row[4],
+                'requested_at': row[5],
+                'reviewed_by': row[6],
+                'reviewed_at': row[7]
+            }
+        return None
     except Exception as e:
         logger.error(f"Error getting registration request: {e}")
+        if conn:
+            conn.close()
+        return None
+
+
+# ========== TASK ASSIGNEE STATUS FUNCTIONS ==========
+
+def add_task_assignees(task_id, user_ids, initial_status='pending'):
+    """
+    Add assignees to a task with an initial status.
+    
+    Args:
+        task_id: Task ID
+        user_ids: List of user IDs to assign
+        initial_status: Initial status for all assignees (default: 'pending')
+    
+    Returns:
+        bool: Success status
+    """
+    if not user_ids:
+        return True
+    
+    # Ensure all user_ids exist in users table
+    for user_id in user_ids:
+        if not user_exists(user_id):
+            add_user(user_id, f"User_{user_id}", None)
+        
+    try:
+        conn = _get_db_connection()
+        cursor = conn.cursor()
+        
+        for user_id in user_ids:
+            cursor.execute('''
+                INSERT INTO task_assignees (task_id, user_id, status)
+                VALUES (%s, %s, %s)
+            ''', (task_id, user_id, initial_status))
+        
+        conn.commit()
+        conn.close()
+        logger.info(f"Added {len(user_ids)} assignees to task {task_id} with status '{initial_status}'")
+        return True
+    except Exception as e:
+        logger.error(f"Error adding task assignees: {e}")
+        conn.close()
+        return False
+
+
+def get_task_assignee_statuses(task_id):
+    """
+    Get all assignees and their individual statuses for a task.
+    
+    Args:
+        task_id: Task ID
+    
+    Returns:
+        dict: {user_id: status} mapping
+    """
+    try:
+        conn = _get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT user_id, status 
+            FROM task_assignees 
+            WHERE task_id = %s
+        ''', (task_id,))
+        
+        rows = cursor.fetchall()
+        conn.close()
+        
+        return {row[0]: row[1] for row in rows}
+    except Exception as e:
+        logger.error(f"Error getting task assignee statuses: {e}")
+        conn.close()
+        return {}
+
+
+def get_assignee_status(task_id, user_id):
+    """
+    Get the status of a specific assignee for a task.
+    
+    Args:
+        task_id: Task ID
+        user_id: User ID
+    
+    Returns:
+        str: Status ('pending', 'in_progress', 'completed', 'cancelled') or None
+    """
+    try:
+        conn = _get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT status 
+            FROM task_assignees 
+            WHERE task_id = %s AND user_id = %s
+        ''', (task_id, user_id))
+        
+        row = cursor.fetchone()
+        conn.close()
+        
+        return row[0] if row else None
+    except Exception as e:
+        logger.error(f"Error getting assignee status: {e}")
         conn.close()
         return None
+
+
+def update_assignee_status(task_id, user_id, new_status):
+    """
+    Update the status of a specific assignee for a task.
+    
+    Args:
+        task_id: Task ID
+        user_id: User ID
+        new_status: New status value
+    
+    Returns:
+        bool: Success status
+    """
+    valid_statuses = ['pending', 'in_progress', 'completed', 'cancelled']
+    if new_status not in valid_statuses:
+        logger.error(f"Invalid status: {new_status}")
+        return False
+        
+    try:
+        conn = _get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            UPDATE task_assignees 
+            SET status = %s, status_updated_at = CURRENT_TIMESTAMP
+            WHERE task_id = %s AND user_id = %s
+        ''', (new_status, task_id, user_id))
+        
+        if cursor.rowcount == 0:
+            logger.warning(f"No assignee found for task {task_id}, user {user_id}")
+            conn.close()
+            return False
+        
+        conn.commit()
+        
+        # Calculate and update aggregate task status
+        aggregate_status = calculate_task_status(task_id)
+        cursor.execute('''
+            UPDATE tasks 
+            SET status = %s, updated_at = CURRENT_TIMESTAMP
+            WHERE task_id = %s
+        ''', (aggregate_status, task_id))
+        
+        conn.commit()
+        conn.close()
+        
+        logger.info(f"Updated task {task_id} assignee {user_id} status to '{new_status}', aggregate status: '{aggregate_status}'")
+        return True
+    except Exception as e:
+        logger.error(f"Error updating assignee status: {e}")
+        conn.close()
+        return False
+
+
+def calculate_task_status(task_id):
+    """
+    Calculate aggregate task status based on all assignee statuses.
+    
+    Rules:
+    - If all assignees have status 'completed' → task is 'completed'
+    - If at least one assignee has 'in_progress' → task is 'in_progress'
+    - If all assignees have 'pending' → task is 'pending'
+    - If all assignees have 'cancelled' → task is 'cancelled'
+    - Mixed states prioritize: in_progress > pending > cancelled
+    
+    Args:
+        task_id: Task ID
+    
+    Returns:
+        str: Aggregate status
+    """
+    try:
+        conn = _get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT status, COUNT(*) as count
+            FROM task_assignees 
+            WHERE task_id = %s
+            GROUP BY status
+        ''', (task_id,))
+        
+        rows = cursor.fetchall()
+        conn.close()
+        
+        if not rows:
+            return 'pending'  # Default if no assignees
+        
+        status_counts = {row[0]: row[1] for row in rows}
+        total_assignees = sum(status_counts.values())
+        
+        # All completed → completed
+        if status_counts.get('completed', 0) == total_assignees:
+            return 'completed'
+        
+        # At least one in_progress → in_progress
+        if status_counts.get('in_progress', 0) > 0:
+            return 'in_progress'
+        
+        # All cancelled → cancelled
+        if status_counts.get('cancelled', 0) == total_assignees:
+            return 'cancelled'
+        
+        # Default: pending (if mix of pending/cancelled or all pending)
+        return 'pending'
+        
+    except Exception as e:
+        logger.error(f"Error calculating task status: {e}")
+        conn.close()
+        return 'pending'
+
+
+def remove_task_assignee(task_id, user_id):
+    """
+    Remove an assignee from a task.
+    
+    Args:
+        task_id: Task ID
+        user_id: User ID to remove
+    
+    Returns:
+        bool: Success status
+    """
+    try:
+        conn = _get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            DELETE FROM task_assignees 
+            WHERE task_id = %s AND user_id = %s
+        ''', (task_id, user_id))
+        
+        conn.commit()
+        
+        # Recalculate aggregate status
+        if cursor.rowcount > 0:
+            aggregate_status = calculate_task_status(task_id)
+            cursor.execute('''
+                UPDATE tasks 
+                SET status = %s, updated_at = CURRENT_TIMESTAMP
+                WHERE task_id = %s
+            ''', (aggregate_status, task_id))
+            conn.commit()
+        
+        conn.close()
+        logger.info(f"Removed assignee {user_id} from task {task_id}")
+        return True
+    except Exception as e:
+        logger.error(f"Error removing task assignee: {e}")
+        conn.close()
+        return False
+
+
+
+
+
