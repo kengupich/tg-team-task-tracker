@@ -511,7 +511,7 @@ def start_bot():
 async def setup_webhook(application):
     """Setup webhook for production mode."""
     async with application:
-        webhook_url = f"{Config.RAILWAY_URL}/{TOKEN}"
+        webhook_url = f"{Config.RAILWAY_URL}/webhook/{TOKEN}"
         logger.info(f"Setting webhook URL: {webhook_url}")
         
         await application.bot.set_webhook(url=webhook_url)
@@ -533,7 +533,7 @@ def run_webhook_server(application):
             """Health check endpoint."""
             return 'Bot is running', 200
         
-        @app.route(f'/{TOKEN}', methods=['POST'])
+        @app.route(f'/webhook/{TOKEN}', methods=['POST'])
         def webhook_handler():
             """Handle Telegram webhook updates."""
             import asyncio
