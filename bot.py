@@ -496,61 +496,21 @@ def start_bot():
         print(f"[BOT] Webhook URL: {Config.RAILWAY_URL}")
         print(f"[BOT] Listening on 0.0.0.0:{Config.PORT}")
         
-        # Set webhook and start server
-        try:
-            import asyncio
-            asyncio.run(setup_webhook(application))
-        except Exception as e:
-            logger.error(f"Failed to setup webhook: {e}")
-            logger.info("Falling back to polling mode")
-            application.run_polling(allowed_updates=Update.ALL_TYPES, timeout=Config.POLLING_TIMEOUT)
-    
-    return application
-
-
-async def setup_webhook(application):
-    """Setup webhook for production mode."""
-    async with application:
-        # Webhook URL should NOT contain the token
+        # Use python-telegram-bot's built-in webhook support
         webhook_url = f"{Config.RAILWAY_URL}/webhook"
         logger.info(f"Setting webhook URL: {webhook_url}")
         
-        await application.bot.set_webhook(url=webhook_url)
-        logger.info("Webhook set successfully")
-        
-        # Start Flask app for webhook
-        run_webhook_server(application)
+        # Start the application with webhook
+        return application.run_webhook(
+            listen="0.0.0.0",
+            port=Config.PORT,
+            url_path="/webhook",
+            webhook_url=webhook_url,
+            allowed_updates=Update.ALL_TYPES
+        )
+    
+    return application
 
-
-def run_webhook_server(application):
-    """Run Flask webhook server."""
-    try:
-        from flask import Flask, request
-        
-        app = Flask(__name__)
-        
-        @app.route('/', methods=['GET'])
-        def health_check():
-            """Health check endpoint."""
-            return 'Bot is running', 200
-        
-        @app.route('/webhook', methods=['POST'])
-        def webhook_handler():
-            """Handle Telegram webhook updates."""
-            import asyncio
-            
-            data = request.get_json()
-            update = Update.de_json(data, application.bot)
-            
-            asyncio.run(application.process_update(update))
-            return 'OK', 200
-        
-        logger.info(f"Starting Flask webhook server on 0.0.0.0:{Config.PORT}")
-        app.run(host='0.0.0.0', port=Config.PORT, debug=False)
-        
-    except ImportError:
-        logger.error("Flask not installed. Install it with: pip install flask")
-        raise
 
 
 def main():
