@@ -508,8 +508,7 @@ def start_bot():
             port=Config.PORT,
             url_path="/webhook",
             webhook_url=webhook_url,
-            allowed_updates=Update.ALL_TYPES,
-            max_concurrent_updates=100  # Allow up to 100 concurrent updates for better performance
+            allowed_updates=Update.ALL_TYPES
         )
     
     return application
