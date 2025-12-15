@@ -298,7 +298,8 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 # ============================================================================
 def start_bot():
     """Start the bot."""
-    application = Application.builder().token(TOKEN).build()
+    # Enable concurrent updates for faster webhook processing
+    application = Application.builder().token(TOKEN).concurrent_updates(True).build()
     
     # Command handlers
     application.add_handler(CommandHandler("start", start))
@@ -507,7 +508,8 @@ def start_bot():
             port=Config.PORT,
             url_path="/webhook",
             webhook_url=webhook_url,
-            allowed_updates=Update.ALL_TYPES
+            allowed_updates=Update.ALL_TYPES,
+            max_concurrent_updates=100  # Allow up to 100 concurrent updates for better performance
         )
     
     return application

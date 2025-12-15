@@ -36,48 +36,59 @@ def setup_test_env():
         conn.close()
         print(f"\nPostgreSQL test database available: {TEST_DB_URL.split('@')[1] if '@' in TEST_DB_URL else 'local'}")
     except psycopg2.Error as e:
-        pytest.skip(f"PostgreSQL not available: {e}")
+        # Only skip if test file is not a mock test
+        # Mock tests don't require PostgreSQL
+        print(f"\nPostgreSQL not available: {e}")
+        print("Mock and unit tests can still run without PostgreSQL")
     
     yield
 
 
 @pytest.fixture
-def test_db():
+def test_db(request):
     """Create a fresh test database for each test."""
-    # Set environment to use test database
-    os.environ["DATABASE_URL"] = TEST_DB_URL
+    # Check if test requires PostgreSQL (marker or file name)
+    is_mock_test = "mock" in request.node.nodeid
+    is_async_mock_test = "test_db_async_mock" in request.node.fspath.basename
     
-    import database
-    from db_postgres import DatabaseConnection
-    
-    # Clear any cached connection
-    import db_postgres
-    db_postgres._db_connection = None
-    
-    # Initialize database schema
-    database.init_db()
-    
-    # Verify database is ready
-    db_conn = db_postgres.get_db_connection()
-    conn = db_conn.get_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT COUNT(*) FROM information_schema.tables WHERE table_name='tasks'")
-    if not cursor.fetchone()[0]:
+    if not is_mock_test and not is_async_mock_test:
+        # Set environment to use test database
+        os.environ["DATABASE_URL"] = TEST_DB_URL
+        
+        import database
+        from db_postgres import DatabaseConnection
+        
+        # Clear any cached connection
+        import db_postgres
+        db_postgres._db_connection = None
+        
+        # Initialize database schema
+        try:
+            database.init_db()
+        except Exception as e:
+            pytest.skip(f"PostgreSQL not available: {e}")
+        
+        # Verify database is ready
+        db_conn = db_postgres.get_db_connection()
+        conn = db_conn.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM information_schema.tables WHERE table_name='tasks'")
+        if not cursor.fetchone()[0]:
+            conn.close()
+            raise RuntimeError("Task table not created properly")
+        
+        # Clear all data from tables before test
+        cursor.execute("TRUNCATE TABLE task_assignees CASCADE")
+        cursor.execute("TRUNCATE TABLE user_groups CASCADE")
+        cursor.execute("TRUNCATE TABLE group_admins CASCADE")
+        cursor.execute("TRUNCATE TABLE task_history CASCADE")
+        cursor.execute("TRUNCATE TABLE task_media CASCADE")
+        cursor.execute("TRUNCATE TABLE tasks CASCADE")
+        cursor.execute("TRUNCATE TABLE registration_requests CASCADE")
+        cursor.execute("TRUNCATE TABLE users CASCADE")
+        cursor.execute("TRUNCATE TABLE groups CASCADE")
+        
         conn.close()
-        raise RuntimeError("Task table not created properly")
-    
-    # Clear all data from tables before test
-    cursor.execute("TRUNCATE TABLE task_assignees CASCADE")
-    cursor.execute("TRUNCATE TABLE user_groups CASCADE")
-    cursor.execute("TRUNCATE TABLE group_admins CASCADE")
-    cursor.execute("TRUNCATE TABLE task_history CASCADE")
-    cursor.execute("TRUNCATE TABLE task_media CASCADE")
-    cursor.execute("TRUNCATE TABLE tasks CASCADE")
-    cursor.execute("TRUNCATE TABLE registration_requests CASCADE")
-    cursor.execute("TRUNCATE TABLE users CASCADE")
-    cursor.execute("TRUNCATE TABLE groups CASCADE")
-    
-    conn.close()
     
     yield TEST_DB_URL
 
