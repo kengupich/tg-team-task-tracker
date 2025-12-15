@@ -118,7 +118,12 @@ SUPER_ADMIN_IDS = [
 ) = range(4)
 
 # Initialize database
-init_db()
+try:
+    init_db()
+except Exception as e:
+    logger.error(f"Failed to initialize database: {e}")
+    import sys
+    sys.exit(1)
 
 
 # ============================================================================

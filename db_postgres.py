@@ -23,13 +23,29 @@ class PostgreSQLConnection:
         """Get PostgreSQL connection string from environment."""
         database_url = os.getenv("DATABASE_URL", "").strip()
         
+        # Detect if running on Railway/production
+        is_railway = os.getenv("RAILWAY_ENVIRONMENT") is not None or os.getenv("PORT") is not None
+        is_production = os.getenv("ENVIRONMENT", "debug").lower() == "production"
+        
         if not database_url:
-            # Use local PostgreSQL if DATABASE_URL not set
-            database_url = os.getenv(
-                "LOCAL_DATABASE_URL",
-                "postgresql://postgres:password@localhost:5432/task_management"
-            )
-            logger.warning(f"DATABASE_URL not set, using LOCAL_DATABASE_URL: {database_url[:50]}...")
+            if is_railway or is_production:
+                # On Railway/production, DATABASE_URL is required
+                error_msg = (
+                    "DATABASE_URL environment variable is not set. "
+                    "On Railway, ensure PostgreSQL service is connected and "
+                    "DATABASE_URL is available in Variables."
+                )
+                logger.error(error_msg)
+                raise ValueError(error_msg)
+            else:
+                # Use local PostgreSQL if DATABASE_URL not set (local development)
+                database_url = os.getenv(
+                    "LOCAL_DATABASE_URL",
+                    "postgresql://postgres:password@localhost:5432/task_management"
+                )
+                logger.warning(f"DATABASE_URL not set, using LOCAL_DATABASE_URL: {database_url[:50]}...")
+        else:
+            logger.info(f"Using DATABASE_URL from environment (production: {is_production})")
         
         # Convert postgres:// to postgresql:// if needed (Railway compatibility)
         if database_url.startswith('postgres://'):

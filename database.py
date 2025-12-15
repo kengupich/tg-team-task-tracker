@@ -18,9 +18,14 @@ logger = logging.getLogger(__name__)
 
 def init_db():
     """Initialize database tables if they don't exist."""
-    db_conn = get_db_connection()
-    conn = db_conn.get_connection()
-    cursor = conn.cursor()
+    try:
+        db_conn = get_db_connection()
+        conn = db_conn.get_connection()
+        cursor = conn.cursor()
+        logger.info("Database connection established successfully")
+    except Exception as e:
+        logger.error(f"Failed to connect to database during initialization: {e}")
+        raise
     
     # Create users table first (no dependencies)
     cursor.execute('''

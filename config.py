@@ -87,5 +87,7 @@ class Config:
 try:
     Config.validate()
 except ValueError as e:
-    print(f"⚠️  Configuration Warning:\n{e}")
+    print(f"⚠️  CONFIGURATION ERROR:\n{e}")
     print("\n💡 Please check your .env file or environment variables")
+    import sys
+    sys.exit(1)
