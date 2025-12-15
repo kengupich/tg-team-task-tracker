@@ -492,12 +492,13 @@ def start_bot():
     else:
         # Production mode: use webhook for Railway
         logger.info(f"[BOT] Running in PRODUCTION mode (webhook)")
-        print(f"[BOT] Bot started in PRODUCTION mode")
-        print(f"[BOT] Webhook URL: {Config.RAILWAY_URL}")
-        print(f"[BOT] Listening on 0.0.0.0:{Config.PORT}")
-        
         # Use python-telegram-bot's built-in webhook support
         webhook_url = f"{Config.RAILWAY_URL}/webhook"
+        
+        print(f"[BOT] Bot started in PRODUCTION mode")
+        print(f"[BOT] Webhook URL: {webhook_url}")
+        print(f"[BOT] Listening on 0.0.0.0:{Config.PORT}")
+        
         logger.info(f"Setting webhook URL: {webhook_url}")
         
         # Start the application with webhook
