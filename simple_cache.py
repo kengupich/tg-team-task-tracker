@@ -50,6 +50,26 @@ class SimpleCache:
         self.set(key, value, ttl)
         return value
     
+    def invalidate(self, key: str):
+        """Invalidate a specific cache key."""
+        if key in self.cache:
+            del self.cache[key]
+            logger.debug(f"🗑️  Cache invalidated: {key}")
+    
+    def invalidate_pattern(self, pattern: str):
+        """Invalidate all cache keys matching a pattern (e.g., 'user_groups_*')."""
+        keys_to_delete = []
+        for key in self.cache.keys():
+            # Simple pattern matching: replace * with .* for regex
+            import re
+            regex_pattern = pattern.replace('*', '.*')
+            if re.match(f"^{regex_pattern}$", key):
+                keys_to_delete.append(key)
+        
+        for key in keys_to_delete:
+            del self.cache[key]
+            logger.debug(f"🗑️  Cache invalidated (pattern): {key}")
+    
     def clear(self):
         """Clear all cache."""
         self.cache.clear()

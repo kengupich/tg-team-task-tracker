@@ -727,6 +727,12 @@ def update_group_admin(group_id, new_admin_id):
         )
         conn.commit()
         conn.close()
+        
+        # Invalidate caches
+        from simple_cache import get_cache
+        get_cache().invalidate("all_groups")
+        get_cache().invalidate_pattern("user_groups_*")
+        
         logger.info(f"Updated group {group_id} admin to {new_admin_id}")
         return True
     except Exception as e:
@@ -783,6 +789,12 @@ def add_group_admin(group_id, admin_id):
         
         conn.commit()
         conn.close()
+        
+        # Invalidate caches
+        from simple_cache import get_cache
+        get_cache().invalidate("all_groups")
+        get_cache().invalidate_pattern("user_groups_*")
+        
         logger.info(f"Added admin {admin_id} to group {group_id}")
         return True
     except Exception as e:
@@ -822,6 +834,12 @@ def remove_group_admin(group_id, admin_id):
         
         conn.commit()
         conn.close()
+        
+        # Invalidate caches
+        from simple_cache import get_cache
+        get_cache().invalidate("all_groups")
+        get_cache().invalidate_pattern("user_groups_*")
+        
         logger.info(f"Removed admin {admin_id} from group {group_id}")
         return True
     except Exception as e:
@@ -958,6 +976,12 @@ def update_group_name(group_id, new_name):
             (new_name, group_id)
         )
         conn.commit()
+        
+        # Invalidate caches
+        from simple_cache import get_cache
+        get_cache().invalidate("all_groups")
+        get_cache().invalidate_pattern("user_groups_*")
+        
         conn.close()
         logger.info(f"Updated group {group_id} name to '{new_name}'")
         return True
@@ -1047,6 +1071,12 @@ def delete_group(group_id):
         )
         
         conn.commit()
+        
+        # Invalidate caches
+        from simple_cache import get_cache
+        get_cache().invalidate("all_groups")
+        get_cache().invalidate_pattern("user_groups_*")
+        
         conn.close()
         logger.info(f"Deleted group {group_id} and cancelled its tasks")
         return True
@@ -1223,6 +1253,11 @@ def add_user_to_group(user_id, group_id):
             "INSERT INTO user_groups (user_id, group_id) VALUES (%s, %s)",
             (user_id, group_id)
         )
+        # Invalidate caches
+        from simple_cache import get_cache
+        get_cache().invalidate(f"user_groups_{user_id}")
+        get_cache().invalidate("all_groups")
+        
         logger.info(f"Added user {user_id} to group {group_id}")
         conn.close()
         return True
@@ -1242,6 +1277,12 @@ def remove_user_from_group(user_id, group_id):
             (user_id, group_id)
         )
         conn.commit()
+        
+        # Invalidate caches
+        from simple_cache import get_cache
+        get_cache().invalidate(f"user_groups_{user_id}")
+        get_cache().invalidate("all_groups")
+        
         conn.close()
         logger.info(f"Removed user {user_id} from group {group_id}")
         return True
