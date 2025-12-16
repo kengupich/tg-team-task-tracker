@@ -76,10 +76,11 @@ async def filter_tasks_created(update: Update, context: ContextTypes.DEFAULT_TYP
     for task in tasks[:20]:
         status_emoji = get_status_emoji(task['status'])
         
-        desc = (task.get('title') or task['description'])[:40] + '...' if len(task.get('title') or task['description']) > 40 else (task.get('title') or task['description'])
+        text = task.get('title') or task.get('description') or ''
+        desc = (text[:40] + '...') if len(text) > 40 else text
         keyboard.append([
             InlineKeyboardButton(
-                f"{status_emoji} {desc} ({task['date']})",
+                f"{status_emoji} {desc} ({task['task_id']})",
                 callback_data=f"view_task_{task['task_id']}"
             )
         ])
@@ -111,7 +112,8 @@ async def filter_tasks_assigned(update: Update, context: ContextTypes.DEFAULT_TY
     for task in tasks[:20]:
         status_emoji = get_status_emoji(task['status'])
         
-        desc = (task.get('title') or task['description'])[:40] + '...' if len(task.get('title') or task['description']) > 40 else (task.get('title') or task['description'])
+        text = task.get('title') or task.get('description') or ''
+        desc = (text[:40] + '...') if len(text) > 40 else text
         keyboard.append([
             InlineKeyboardButton(
                 f"{status_emoji} {desc} ({task['date']})",
@@ -252,7 +254,8 @@ async def filter_group_all_tasks(update: Update, context: ContextTypes.DEFAULT_T
     for task in tasks[:20]:
         status_emoji = get_status_emoji(task['status'])
         
-        desc = (task.get('title') or task['description'])[:40] + '...' if len(task.get('title') or task['description']) > 40 else (task.get('title') or task['description'])
+        text = task.get('title') or task.get('description') or ''
+        desc = (text[:40] + '...') if len(text) > 40 else text
         keyboard.append([
             InlineKeyboardButton(
                 f"{status_emoji} {desc} ({task['date']})",
@@ -301,7 +304,8 @@ async def filter_tasks_by_assignee(update: Update, context: ContextTypes.DEFAULT
     for task in tasks[:20]:
         status_emoji = get_status_emoji(task['status'])
         
-        desc = (task.get('title') or task['description'])[:40] + '...' if len(task.get('title') or task['description']) > 40 else (task.get('title') or task['description'])
+        text = task.get('title') or task.get('description') or ''
+        desc = (text[:40] + '...') if len(text) > 40 else text
         keyboard.append([
             InlineKeyboardButton(
                 f"{status_emoji} {desc} ({task['date']})",
@@ -361,7 +365,8 @@ async def filter_tasks_all(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     for task in tasks[:20]:
         status_emoji = get_status_emoji(task['status'])
         
-        desc = (task.get('title') or task['description'])[:40] + '...' if len(task.get('title') or task['description']) > 40 else (task.get('title') or task['description'])
+        text = task.get('title') or task.get('description') or ''
+        desc = (text[:40] + '...') if len(text) > 40 else text
         keyboard.append([
             InlineKeyboardButton(
                 f"{status_emoji} {desc} ({task['date']})",
@@ -430,7 +435,8 @@ async def filter_archived_created(update: Update, context: ContextTypes.DEFAULT_
     
     keyboard = []
     for task in page_tasks:
-        desc = (task.get('title') or task['description'])[:40] + '...' if len(task.get('title') or task['description']) > 40 else (task.get('title') or task['description'])
+        text = task.get('title') or task.get('description') or ''
+        desc = (text[:40] + '...') if len(text) > 40 else text
         keyboard.append([
             InlineKeyboardButton(
                 f"✅ {desc} ({task['date']})",
@@ -493,7 +499,8 @@ async def filter_archived_assigned(update: Update, context: ContextTypes.DEFAULT
     
     keyboard = []
     for task in page_tasks:
-        desc = (task.get('title') or task['description'])[:40] + '...' if len(task.get('title') or task['description']) > 40 else (task.get('title') or task['description'])
+        text = task.get('title') or task.get('description') or ''
+        desc = (text[:40] + '...') if len(text) > 40 else text
         keyboard.append([
             InlineKeyboardButton(
                 f"✅ {desc} ({task['date']})",
