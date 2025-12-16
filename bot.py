@@ -21,6 +21,7 @@ from config import Config
 warnings.filterwarnings("ignore", message=".*per_message.*")
 
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram.error import BadRequest
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -286,6 +287,21 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         else:
             await query.answer()
 
+    except BadRequest as e:
+        # Handle Telegram API errors (e.g., "Message is not modified")
+        if "Message is not modified" in str(e):
+            logger.debug(f"Message not modified for callback '{data}' - user {query.from_user.id}")
+            try:
+                await query.answer()
+            except Exception:
+                pass
+        else:
+            logger.error(f"BadRequest while handling callback '{data}': {e}")
+            try:
+                await query.answer(f"❌ Помилка Telegram API: {str(e)[:50]}")
+            except Exception:
+                pass
+        return None
     except Exception as e:
         logger.exception("Error while handling callback '%s': %s", data, e)
         try:
