@@ -62,15 +62,26 @@ async def view_task_detail(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     status_text = format_task_status(task['status'])
     
     # Build task info
-    task_info = (
-        f"📋 ЗАДАНИЕ #{task['task_id']} {task['title']}\n\n"
+    task_info = f"📋 ЗАДАНИЕ #{task['task_id']}\n\n"
+    
+    # Add title if it exists and is different from description
+    title = task.get('title', '').strip()
+    if title:
+        task_info += f"📝 Название:\n{title}\n\n"
+    
+    # Add metadata
+    task_info += (
         f"📅 Дата: {task['date']}\n"
         f"🕐 Дедлайн: {task['time']}\n"
         f"📍 Отдел: {group_name}\n"
         f"📊 Общий статус: {status_text}\n"
         f"👤 Постановщик: {creator_name}\n\n"
-        f"📝 Описание:\n{task['description']}\n\n"
     )
+    
+    # Add description if it exists
+    description = task.get('description', '').strip()
+    if description:
+        task_info += f"📋 Описание:\n{description}\n\n"
     
     if assigned_users:
         task_info += f"👥 Исполнители ({len(assigned_users)}):\n"

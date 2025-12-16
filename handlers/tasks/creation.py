@@ -590,7 +590,7 @@ async def task_confirm_users(update: Update, context: ContextTypes.DEFAULT_TYPE)
     task_id = db_create_task(
         date=task_data["date"],
         time=task_data["time"],
-        description=description or title,  # Use description, fallback to title
+        description=description or "",  # Keep description separate from title
         group_id=group_id,
         admin_id=task_data["admin_id"],
         assigned_to_list=assigned_users,
