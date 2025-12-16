@@ -177,6 +177,37 @@ def init_db():
     logger.info("Database initialized")
 
 
+class _PoolAwareConnection:
+    """Wrapper around psycopg2 connection that returns to pool on close()"""
+    def __init__(self, conn, pool_instance):
+        self._conn = conn
+        self._pool_instance = pool_instance
+        self._returned = False
+    
+    def close(self):
+        """Close connection by returning it to the pool"""
+        if not self._returned:
+            try:
+                self._pool_instance.return_connection(self._conn)
+                self._returned = True
+            except Exception:
+                # If return fails, close for real as fallback
+                try:
+                    self._conn.close()
+                except Exception:
+                    pass
+    
+    def __getattr__(self, name):
+        """Proxy all other attributes to the wrapped connection"""
+        return getattr(self._conn, name)
+    
+    def __enter__(self):
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
+
+
 def _get_db_connection():
     """
     Get database connection from pool.
@@ -190,20 +221,8 @@ def _get_db_connection():
     # Store pool reference for later cleanup
     _db_pool_instance = db_conn
     
-    # Wrap conn.close() to return to pool instead of actually closing
-    original_close = conn.close
-    def pool_aware_close():
-        try:
-            db_conn.return_connection(conn)
-        except Exception:
-            # If return fails, call original close as fallback
-            try:
-                original_close()
-            except Exception:
-                pass
-    
-    conn.close = pool_aware_close
-    return conn
+    # Wrap connection to return to pool on close()
+    return _PoolAwareConnection(conn, db_conn)
 
 
 def add_user(user_id, name, username=None):
