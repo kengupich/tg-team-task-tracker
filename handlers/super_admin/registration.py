@@ -41,7 +41,7 @@ async def super_view_registration_requests(update: Update, context: ContextTypes
         text += f"• {req['name']} ({username_info})\n"
         keyboard.append([
             InlineKeyboardButton(
-                f"👤 {req['name']} - ID: {req['user_id']}",
+                f"👤 {req['name']}",
                 callback_data=f"super_review_request_{req['request_id']}"
             )
         ])
@@ -67,7 +67,6 @@ async def super_review_registration_request(update: Update, context: ContextType
     text = (
         f"📋 Запрос на регистрацию\n\n"
         f"👤 Имя: {request['name']}\n"
-        f"🆔 Telegram ID: {request['user_id']}\n"
         f"📱 Username: {username_info}\n"
         f"📅 Дата запроса: {request['requested_at']}\n\n"
         f"Утвердить этого пользователя?"

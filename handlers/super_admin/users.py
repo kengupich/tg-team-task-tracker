@@ -139,7 +139,7 @@ async def super_list_group_users(update: Update, context: ContextTypes.DEFAULT_T
     text = f"Сотрудники в отделе:\n\n"
     for u in users:
         keyboard.append([InlineKeyboardButton(f"{u['name']}", callback_data=f"super_user_{u['user_id']}")])
-        text += f"• {u['name']} (ID: {u['user_id']})\n"
+        text += f"• {u['name']}\n"
 
     # Add Edit list button
     keyboard.append([InlineKeyboardButton("✏️ Редактировать список", callback_data="super_edit_group_members")])
@@ -160,7 +160,7 @@ async def super_list_no_group_users(update: Update, context: ContextTypes.DEFAUL
     text = "Работники без отдела:\n\n"
     for u in users:
         keyboard.append([InlineKeyboardButton(f"{u['name']}", callback_data=f"super_user_{u['user_id']}")])
-        text += f"• {u['name']} (ID: {u['user_id']})\n"
+        text += f"• {u['name']}\n"
 
     keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="super_manage_users")])
     await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
@@ -201,7 +201,7 @@ async def super_user_action_menu(update: Update, context: ContextTypes.DEFAULT_T
     keyboard.append([InlineKeyboardButton("🗑️ Удалить", callback_data=f"super_user_delete_{user_id}")])
     keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="super_manage_users")])
     
-    message_text = f"Работник: {user['name']} (ID: {user['user_id']})\nСтатус: {ban_status}\n\nОтделы: {groups_text}"
+    message_text = f"Работник: {user['name']}\nСтатус: {ban_status}\n\nОтделы: {groups_text}"
     await query.edit_message_text(message_text, reply_markup=InlineKeyboardMarkup(keyboard))
 
 
@@ -521,7 +521,6 @@ async def super_user_name_input(update: Update, context: ContextTypes.DEFAULT_TY
     
     await update.message.reply_text(
         f"Подтвердите данные работника:\n"
-        f"ID: {user_id}\n"
         f"Имя: {user_name}",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )

@@ -312,7 +312,7 @@ async def super_change_admin(update: Update, context: ContextTypes.DEFAULT_TYPE)
         # database.get_all_users() returns dicts with keys 'user_id' and 'name'
         keyboard.append([
             InlineKeyboardButton(
-                f"👤 {user.get('name') or user.get('username','unknown')} (ID: {user['user_id']})",
+                f"👤 {user.get('name') or user.get('username','unknown')}",
                 callback_data=f"super_select_new_admin_{user['user_id']}"
             )
         ])
@@ -480,7 +480,7 @@ async def super_edit_members_confirm(update: Update, context: ContextTypes.DEFAU
         preview_lines.append("Добавить в эту группу:")
         for uid in to_add:
             u = get_user_by_id(uid)
-            preview_lines.append(f"• {u['name']} (ID: {uid})")
+            preview_lines.append(f"• {u['name']}")
     else:
         preview_lines.append("Добавить в эту группу: нет")
 
@@ -488,7 +488,7 @@ async def super_edit_members_confirm(update: Update, context: ContextTypes.DEFAU
         preview_lines.append("\nУдалить из этой группы:")
         for uid in to_remove:
             u = get_user_by_id(uid)
-            preview_lines.append(f"• {u['name']} (ID: {uid})")
+            preview_lines.append(f"• {u['name']}")
     else:
         preview_lines.append("\nУдалить из этой группы: нет")
 
@@ -646,8 +646,8 @@ async def super_view_group_users(update: Update, context: ContextTypes.DEFAULT_T
     keyboard = []
     text = f"Сотрудники в отделе:\n\n"
     for u in users:
-        keyboard.append([InlineKeyboardButton(f"{u['name']}", callback_data=f"super_user_{u['user_id']}")])  
-        text += f"• {u['name']} (ID: {u['user_id']})\n"
+        keyboard.append([InlineKeyboardButton(f"{u['name']}", callback_data=f"super_user_{u['user_id']}")])
+        text += f"• {u['name']}\n"
     # Add Edit list button (open checkbox editor)
     keyboard.append([InlineKeyboardButton("✏️ Редактировать список", callback_data="super_edit_group_members")])
     keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="super_back_to_group")])

@@ -278,8 +278,8 @@ async def show_users_step(update: Update, context: ContextTypes.DEFAULT_TYPE, is
     for user in all_users:
         checkbox = "☑" if user['user_id'] in selected else "☐"
         
-        # Format: Name [@username or ID] [Groups or -]
-        username_part = f"@{user.get('username')}" if user.get('username') else f"ID:{user['user_id']}"
+        # Format: Name [@username] [Groups or -]
+        username_part = f"@{user.get('username')}" if user.get('username') else ""
         
         # Show all groups or single group
         all_groups = user.get('all_groups', '')

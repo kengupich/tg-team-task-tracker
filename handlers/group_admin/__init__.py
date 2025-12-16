@@ -51,7 +51,7 @@ async def admin_manage_users(update: Update, context: ContextTypes.DEFAULT_TYPE)
     
     user_list = f"👥 работников в отделе ({len(users)}):\n\n"
     for u in users:
-        user_list += f"• {u['name']} (ID: {u['user_id']})\n"
+        user_list += f"• {u['name']}\n"
     
     keyboard = [
         [InlineKeyboardButton("🆕 Добавить работника", callback_data="admin_add_user")],

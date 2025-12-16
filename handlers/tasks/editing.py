@@ -651,7 +651,7 @@ async def show_users_edit_menu(update: Update, context: ContextTypes.DEFAULT_TYP
     
     for user in all_users:
         checkbox = "☑" if user['user_id'] in selected else "☐"
-        username_part = f"@{user.get('username')}" if user.get('username') else f"ID:{user['user_id']}"
+        username_part = f"@{user.get('username')}" if user.get('username') else ""
         all_groups = user.get('all_groups', '')
         group_part = all_groups if all_groups else user.get('group_name', '-')
         
