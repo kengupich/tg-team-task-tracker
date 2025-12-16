@@ -294,7 +294,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         # Log total time
         elapsed = time.time() - start_time
         if elapsed > 0.5:
-            logger.warning(f"⏱️  SLOW: Кнопка '{data}' обробилась за {elapsed:.2f}s")
+            logger.info(f"⏱️  SLOW: Кнопка '{data}' обробилась за {elapsed:.2f}s")
         else:
             logger.debug(f"⏱️  OK: Кнопка '{data}' обробилась за {elapsed:.2f}s")
 

@@ -625,7 +625,15 @@ def get_group(group_id):
 
 
 def get_all_groups():
-    """Get all groups."""
+    """Get all groups. Results are cached for 5 minutes."""
+    from simple_cache import get_cache
+    
+    # Try cache first (TTL 5 minutes)
+    cache_key = "all_groups"
+    cached_result = get_cache().get(cache_key)
+    if cached_result is not None:
+        return cached_result
+    
     conn = _get_db_connection()
     cursor = conn.cursor()
     
@@ -635,6 +643,9 @@ def get_all_groups():
         )
         groups = [{"group_id": row[0], "name": row[1], "admin_id": row[2]} for row in cursor.fetchall()]
         conn.close()
+        
+        # Cache result for 5 minutes
+        get_cache().set(cache_key, groups, ttl=300)
         return groups
     except Exception as e:
         logger.error(f"Error getting groups: {e}")
@@ -1195,7 +1206,15 @@ def remove_user_from_group(user_id, group_id):
 
 
 def get_user_groups(user_id):
-    """Get all groups a user belongs to."""
+    """Get all groups a user belongs to. Results are cached for 5 minutes."""
+    from simple_cache import get_cache
+    
+    # Try cache first (TTL 5 minutes)
+    cache_key = f"user_groups_{user_id}"
+    cached_result = get_cache().get(cache_key)
+    if cached_result is not None:
+        return cached_result
+    
     conn = _get_db_connection()
     cursor = conn.cursor()
     try:
@@ -1206,6 +1225,9 @@ def get_user_groups(user_id):
         rows = cursor.fetchall()
         groups = [{"group_id": row[0], "name": row[1]} for row in rows]
         conn.close()
+        
+        # Cache result for 5 minutes
+        get_cache().set(cache_key, groups, ttl=300)
         return groups
     except Exception as e:
         logger.error(f"Error getting user groups: {e}")

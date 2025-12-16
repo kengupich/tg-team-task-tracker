@@ -96,7 +96,9 @@ class PostgreSQLConnection:
             conn = self.pool.getconn()
             elapsed = time.time() - start
             
-            if elapsed > 0.1:
+            if elapsed > 0.5:
+                logger.warning(f"🐌 DB POOL GET slow: {elapsed:.3f}s")
+            elif elapsed > 0.1:
                 logger.debug(f"🐌 DB POOL GET: {elapsed:.3f}s (reusing connection)")
             
             # Use AUTOCOMMIT mode for auto-commit
