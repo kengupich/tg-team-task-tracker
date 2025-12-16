@@ -3,11 +3,15 @@ Database module for Team Task Management Bot.
 Handles all database operations including creating tasks, managing users,
 and tracking performance metrics.
 
-Uses PostgreSQL exclusively (local or Railway).
+Uses PostgreSQL exclusively (local or Railway) with connection pooling.
 """
 import logging
 from datetime import datetime
+from contextlib import contextmanager
 from db_postgres import get_db_connection
+
+# Track pool instance for connection management
+_db_pool_instance = None
 
 # Set up logging
 logging.basicConfig(
@@ -23,6 +27,9 @@ def init_db():
         conn = db_conn.get_connection()
         cursor = conn.cursor()
         logger.info("Database connection established successfully")
+        
+        # Note: init_db doesn't use context manager as it's special initialization
+        # We'll return the connection manually at the end
     except Exception as e:
         logger.error(f"Failed to connect to database during initialization: {e}")
         raise
@@ -166,17 +173,37 @@ def init_db():
     ''')
     
     conn.commit()
-    conn.close()
+    conn.close()  # Will automatically return to pool
     logger.info("Database initialized")
 
 
 def _get_db_connection():
     """
-    Get database connection (SQLite or PostgreSQL).
-    This is an internal helper function used by all database operations.
+    Get database connection from pool.
+    Automatically returns to pool when conn.close() is called.
     """
+    global _db_pool_instance
+    
     db_conn = get_db_connection()
-    return db_conn.get_connection()
+    conn = db_conn.get_connection()
+    
+    # Store pool reference for later cleanup
+    _db_pool_instance = db_conn
+    
+    # Wrap conn.close() to return to pool instead of actually closing
+    original_close = conn.close
+    def pool_aware_close():
+        try:
+            db_conn.return_connection(conn)
+        except Exception:
+            # If return fails, call original close as fallback
+            try:
+                original_close()
+            except Exception:
+                pass
+    
+    conn.close = pool_aware_close
+    return conn
 
 
 def add_user(user_id, name, username=None):
