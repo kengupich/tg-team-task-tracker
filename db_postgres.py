@@ -65,13 +65,22 @@ class PostgreSQLConnection:
     
     def get_connection(self):
         """Get new database connection."""
+        import time
         try:
             # Validate connection on first use
             if not self._validated:
                 self._validate_connection()
                 self._validated = True
             
+            start = time.time()
             conn = connect(self.connection_string)
+            elapsed = time.time() - start
+            
+            if elapsed > 0.5:
+                logger.warning(f"🐌 DB CONNECTION slow: {elapsed:.2f}s")
+            elif elapsed > 0.1:
+                logger.debug(f"🐌 DB CONNECTION: {elapsed:.3f}s")
+            
             # Use AUTOCOMMIT mode for auto-commit
             conn.set_isolation_level(extensions.ISOLATION_LEVEL_AUTOCOMMIT)
             return conn

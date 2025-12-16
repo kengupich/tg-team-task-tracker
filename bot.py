@@ -130,10 +130,14 @@ except Exception as e:
 # ============================================================================
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle inline button callbacks."""
+    import time
     query = update.callback_query
     data = query.data
+    start_time = time.time()
+    user_id = query.from_user.id
+    
     # Debug log to trace callback operations (helps diagnose unresponsive buttons)
-    logger.info(f"Натиснуто кнопку: {data} користувачем {query.from_user.id}")
+    logger.info(f"⏱️  START: Кнопка '{data}' від користувача {user_id}")
 
     try:
         # Registration button
@@ -286,6 +290,13 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
         else:
             await query.answer()
+        
+        # Log total time
+        elapsed = time.time() - start_time
+        if elapsed > 0.5:
+            logger.warning(f"⏱️  SLOW: Кнопка '{data}' обробилась за {elapsed:.2f}s")
+        else:
+            logger.debug(f"⏱️  OK: Кнопка '{data}' обробилась за {elapsed:.2f}s")
 
     except BadRequest as e:
         # Handle Telegram API errors (e.g., "Message is not modified")

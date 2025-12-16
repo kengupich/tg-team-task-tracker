@@ -1045,15 +1045,22 @@ def add_user_to_group(user_id, name, group_id):
 
 def get_group_users(group_id):
     """Get all users in a group (from user_groups many-to-many table)."""
+    import time
+    start = time.time()
+    
     conn = _get_db_connection()
     cursor = conn.cursor()
     
     try:
         # Get users assigned to this group via user_groups table
+        q_start = time.time()
         cursor.execute(
             "SELECT u.user_id, u.name FROM users u INNER JOIN user_groups ug ON u.user_id = ug.user_id WHERE ug.group_id = %s",
             (group_id,)
         )
+        q_elapsed = time.time() - q_start
+        if q_elapsed > 0.1:
+            logger.debug(f"🐌 get_group_users query 1 took {q_elapsed:.3f}s")
         users_rows = cursor.fetchall()
 
         # Get admins for this group from group_admins (may include users without group_id set)
