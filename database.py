@@ -1021,20 +1021,25 @@ def delete_task(task_id):
             (task_id,)
         )
         
+        # Check rows_deleted BEFORE commit and close
         rows_deleted = cursor.rowcount
         conn.commit()
-        conn.close()
+        
+        logger.info(f"Delete attempt for task {task_id}: {rows_deleted} rows affected")
         
         if rows_deleted > 0:
-            logger.info(f"Deleted task {task_id} and its media files")
+            logger.info(f"Successfully deleted task {task_id} and its media files")
             return True
         else:
-            logger.warning(f"Task {task_id} not found")
+            logger.warning(f"Task {task_id} not found for deletion")
             return False
     except Exception as e:
-        logger.error(f"Error deleting task: {e}")
-        conn.close()
+        logger.error(f"Error deleting task {task_id}: {e}", exc_info=True)
+        conn.commit()  # Rollback by not committing, but close connection properly
         return False
+    finally:
+        # Always close the connection to return it to the pool
+        conn.close()
 
 
 def delete_group(group_id):
@@ -1077,13 +1082,14 @@ def delete_group(group_id):
         get_cache().invalidate("all_groups")
         get_cache().invalidate_pattern("user_groups_*")
         
-        conn.close()
-        logger.info(f"Deleted group {group_id} and cancelled its tasks")
+        logger.info(f"Successfully deleted group {group_id} and cancelled its tasks")
         return True
     except Exception as e:
-        logger.error(f"Error deleting group: {e}")
-        conn.close()
+        logger.error(f"Error deleting group {group_id}: {e}", exc_info=True)
         return False
+    finally:
+        # Always close the connection to return it to the pool
+        conn.close()
 
 
 def add_user_to_group(user_id, name, group_id):

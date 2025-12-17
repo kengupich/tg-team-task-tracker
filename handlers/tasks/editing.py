@@ -176,14 +176,24 @@ async def delete_task_confirm_handler(update: Update, context: ContextTypes.DEFA
     keyboard = [[InlineKeyboardButton("⬅️ К списку заданий", callback_data="super_manage_tasks")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    if delete_task(task_id):
+    logger.info(f"User {user_id} attempting to delete task {task_id}")
+    try:
+        if delete_task(task_id):
+            logger.info(f"Task {task_id} successfully deleted by user {user_id}")
+            await query.edit_message_text(
+                f"✅ Задание #{task_id} успешно удалено.",
+                reply_markup=reply_markup
+            )
+        else:
+            logger.warning(f"Failed to delete task {task_id} - delete_task returned False")
+            await query.edit_message_text(
+                f"❌ Не удалось удалить задание #{task_id}.",
+                reply_markup=reply_markup
+            )
+    except Exception as e:
+        logger.error(f"Exception while deleting task {task_id}: {e}", exc_info=True)
         await query.edit_message_text(
-            f"✅ Задание #{task_id} успешно удалено.",
-            reply_markup=reply_markup
-        )
-    else:
-        await query.edit_message_text(
-            f"❌ Не удалось удалить задание #{task_id}.",
+            f"❌ Ошибка при удалении задания #{task_id}: {str(e)}",
             reply_markup=reply_markup
         )
 
