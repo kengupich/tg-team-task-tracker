@@ -47,12 +47,17 @@ def get_status_emoji(status: str) -> str:
 def get_task_display_text(task: dict) -> str:
     """
     Get display text for task in list/filter views.
-    Priority: title > description
+    Priority: title > Task #id
     Returns text truncated to 40 chars, cannot be empty.
     """
-    text = task.get('title') or ''
-    if not text:
+    # Try title first
+    text = task.get('title')
+    if text and text.strip():  # Check if title exists and is not just whitespace
+        text = text.strip()
+    else:
+        # Ultimate fallback if no title
         text = f"Task #{task.get('task_id', '?')}"
+    
     return (text[:40] + '...') if len(text) > 40 else text
 
 
@@ -71,10 +76,9 @@ def format_task_button(task: dict, show_date: bool = True) -> InlineKeyboardButt
     display_text = get_task_display_text(task)
     
     # Use date if available and requested, otherwise use task_id
-    suffix = task.get('task_id')
     
     return InlineKeyboardButton(
-        f"{status_emoji} {display_text} ({suffix})",
+        f"{status_emoji} {display_text} (#{task.get('task_id', '?')})",
         callback_data=f"view_task_{task['task_id']}"
     )
 

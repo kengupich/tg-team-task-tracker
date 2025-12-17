@@ -1644,7 +1644,7 @@ def get_group_tasks(group_id):
     
     try:
         cursor.execute(
-            """SELECT task_id, date, time, description, group_id, assigned_to_list, 
+            """SELECT task_id, date, time, description, title, group_id, assigned_to_list, 
                       status, has_media, created_at 
                FROM tasks WHERE group_id = %s ORDER BY created_at DESC""",
             (group_id,)
@@ -1656,11 +1656,12 @@ def get_group_tasks(group_id):
                 "date": row[1],
                 "time": row[2],
                 "description": row[3],
-                "group_id": row[4],
-                "assigned_to_list": row[5],
-                "status": row[6],
-                "has_media": row[7],
-                "created_at": row[8]
+                "title": row[4],
+                "group_id": row[5],
+                "assigned_to_list": row[6],
+                "status": row[7],
+                "has_media": row[8],
+                "created_at": row[9]
             })
         conn.close()
         return tasks
@@ -1679,7 +1680,7 @@ def get_user_tasks(user_id):
     
     try:
         cursor.execute(
-            """SELECT task_id, date, time, description, group_id, assigned_to_list, 
+            """SELECT task_id, date, time, description, title, group_id, assigned_to_list, 
                       status, has_media, created_at, created_by
                FROM tasks WHERE status NOT IN ('cancelled', 'completed') ORDER BY created_at DESC"""
         )
@@ -1690,12 +1691,13 @@ def get_user_tasks(user_id):
                 "date": row[1],
                 "time": row[2],
                 "description": row[3],
-                "group_id": row[4],
-                "assigned_to_list": row[5],
-                "status": row[6],
-                "has_media": row[7],
-                "created_at": row[8],
-                "created_by": row[9]
+                "title": row[4],
+                "group_id": row[5],
+                "assigned_to_list": row[6],
+                "status": row[7],
+                "has_media": row[8],
+                "created_at": row[9],
+                "created_by": row[10]
             }
             assigned_list = json.loads(task.get('assigned_to_list') or '[]')
             if user_id in assigned_list:
@@ -1715,7 +1717,7 @@ def get_tasks_created_by_user(user_id):
     
     try:
         cursor.execute(
-            """SELECT task_id, date, time, description, group_id, assigned_to_list, 
+            """SELECT task_id, date, time, description, title, group_id, assigned_to_list, 
                       status, has_media, created_at, created_by
                FROM tasks WHERE created_by = %s AND status NOT IN ('cancelled', 'completed') 
                ORDER BY created_at DESC""",
@@ -1728,12 +1730,13 @@ def get_tasks_created_by_user(user_id):
                 "date": row[1],
                 "time": row[2],
                 "description": row[3],
-                "group_id": row[4],
-                "assigned_to_list": row[5],
-                "status": row[6],
-                "has_media": row[7],
-                "created_at": row[8],
-                "created_by": row[9]
+                "title": row[4],
+                "group_id": row[5],
+                "assigned_to_list": row[6],
+                "status": row[7],
+                "has_media": row[8],
+                "created_at": row[9],
+                "created_by": row[10]
             })
         conn.close()
         return tasks
@@ -1789,7 +1792,7 @@ def get_archived_tasks_created_by_user(user_id):
     
     try:
         cursor.execute(
-            """SELECT task_id, date, time, description, group_id, assigned_to_list, 
+            """SELECT task_id, date, time, description, title, group_id, assigned_to_list, 
                       status, has_media, created_at, created_by, updated_at
                FROM tasks WHERE created_by = %s AND status = 'completed' 
                ORDER BY updated_at DESC""",
@@ -1802,13 +1805,14 @@ def get_archived_tasks_created_by_user(user_id):
                 'date': row[1],
                 'time': row[2],
                 'description': row[3],
-                'group_id': row[4],
-                'assigned_to_list': row[5],
-                'status': row[6],
-                'has_media': row[7],
-                'created_at': row[8],
-                'created_by': row[9],
-                'updated_at': row[10]
+                'title': row[4],
+                'group_id': row[5],
+                'assigned_to_list': row[6],
+                'status': row[7],
+                'has_media': row[8],
+                'created_at': row[9],
+                'created_by': row[10],
+                'updated_at': row[11]
             })
         conn.close()
         return tasks
@@ -1825,7 +1829,7 @@ def get_all_tasks():
     
     try:
         cursor.execute(
-            """SELECT task_id, date, time, description, group_id, assigned_to_list, 
+            """SELECT task_id, date, time, description, title, group_id, assigned_to_list, 
                       status, has_media, created_at, created_by
                FROM tasks WHERE status != 'cancelled' ORDER BY created_at DESC"""
         )
@@ -1836,12 +1840,13 @@ def get_all_tasks():
                 'date': row[1],
                 'time': row[2],
                 'description': row[3],
-                'group_id': row[4],
-                'assigned_to_list': row[5],
-                'status': row[6],
-                'has_media': row[7],
-                'created_at': row[8],
-                'created_by': row[9]
+                'title': row[4],
+                'group_id': row[5],
+                'assigned_to_list': row[6],
+                'status': row[7],
+                'has_media': row[8],
+                'created_at': row[9],
+                'created_by': row[10]
             })
         conn.close()
         return tasks
@@ -1861,7 +1866,7 @@ def get_multiple_groups_tasks(group_ids):
     
     try:
         placeholders = ','.join('%s' * len(group_ids))
-        query = f"""SELECT task_id, date, time, description, group_id, assigned_to_list, 
+        query = f"""SELECT task_id, date, time, description, title, group_id, assigned_to_list, 
                            status, has_media, created_at, created_by
                     FROM tasks WHERE group_id IN ({placeholders}) AND status != 'cancelled' 
                     ORDER BY created_at DESC"""
@@ -1873,12 +1878,13 @@ def get_multiple_groups_tasks(group_ids):
                 'date': row[1],
                 'time': row[2],
                 'description': row[3],
-                'group_id': row[4],
-                'assigned_to_list': row[5],
-                'status': row[6],
-                'has_media': row[7],
-                'created_at': row[8],
-                'created_by': row[9]
+                'title': row[4],
+                'group_id': row[5],
+                'assigned_to_list': row[6],
+                'status': row[7],
+                'has_media': row[8],
+                'created_at': row[9],
+                'created_by': row[10]
             })
         conn.close()
         return tasks
