@@ -61,6 +61,7 @@ async def super_manage_groups(update: Update, context: ContextTypes.DEFAULT_TYPE
                     callback_data=f"super_admin_select_{group['group_id']}"
                 )
             ])
+        keyboard.append([InlineKeyboardButton("📂 Добавить меня в отдел", callback_data="super_my_groups")])
         keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="start_menu"), InlineKeyboardButton(f"🆕 Добавить отдел", callback_data="super_add_group")])
         
         reply_markup = InlineKeyboardMarkup(keyboard)

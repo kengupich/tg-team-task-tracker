@@ -23,7 +23,6 @@ async def show_main_menu(user_id: int, user_name: str, update: Update, is_callba
             [InlineKeyboardButton("📋 Задачи", callback_data="view_tasks_menu")],
             [InlineKeyboardButton("👥 Отделы", callback_data="super_manage_groups")],
             [InlineKeyboardButton("👤 Сотрудники", callback_data="super_manage_users")],
-            [InlineKeyboardButton("📂 Мої отділи", callback_data="super_my_groups")],
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         text = f"🔐 Приветствую, {user_name}!\n\nГлавное меню:"

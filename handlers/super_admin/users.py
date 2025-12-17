@@ -589,7 +589,7 @@ async def super_my_groups(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     
     # Show checklist of groups
     keyboard = []
-    text = "📂 Виберіть мої відділи:\n\nВи зможете отримувати завдання від співробітників в цих відділах:"
+    text = "📂 Выберите отделы, сотрудники которых смогут ставить вам задачи:"
     
     for group in all_groups:
         gid = group['group_id']
@@ -600,8 +600,8 @@ async def super_my_groups(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         )])
     
     # Confirm / Cancel buttons
-    keyboard.append([InlineKeyboardButton("✅ Підтвердити", callback_data=f"super_user_groups_confirm_{user_id}")])
-    keyboard.append([InlineKeyboardButton("❌ Отменить", callback_data="start_menu")])
+    keyboard.append([InlineKeyboardButton("✅ Подтвердить", callback_data=f"super_user_groups_confirm_{user_id}")])
+    keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="start_menu")])
     
     await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
 
