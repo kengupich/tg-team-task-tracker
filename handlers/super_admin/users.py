@@ -43,6 +43,7 @@ __all__ = [
     'super_user_name_input',
     'super_confirm_user',
     'super_cancel_user',
+    'super_my_groups',
     'USER_NAME_INPUT',
     'WAITING_GROUP_SELECT',
     'USER_ID_INPUT',
@@ -567,6 +568,42 @@ async def super_cancel_user(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     )
     
     return ConversationHandler.END
+
+
+async def super_my_groups(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Allow super admin to manage their own groups."""
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = query.from_user.id
+    
+    # Get all groups and user's current groups
+    all_groups = get_all_groups()
+    user_groups = get_user_groups(user_id)
+    user_group_ids = {g['group_id'] for g in user_groups}
+    
+    # Store original selection for rollback
+    context.user_data['edit_user_groups_id'] = user_id
+    context.user_data['edit_user_groups_original'] = user_group_ids.copy()
+    context.user_data['edit_user_groups_selection'] = user_group_ids.copy()
+    
+    # Show checklist of groups
+    keyboard = []
+    text = "📂 Виберіть мої відділи:\n\nВи зможете отримувати завдання від співробітників в цих відділах:"
+    
+    for group in all_groups:
+        gid = group['group_id']
+        checked = '☑' if gid in user_group_ids else '☐'
+        keyboard.append([InlineKeyboardButton(
+            f"{checked} {group['name']}",
+            callback_data=f"super_user_toggle_group_{user_id}_{gid}"
+        )])
+    
+    # Confirm / Cancel buttons
+    keyboard.append([InlineKeyboardButton("✅ Підтвердити", callback_data=f"super_user_groups_confirm_{user_id}")])
+    keyboard.append([InlineKeyboardButton("❌ Отменить", callback_data="start_menu")])
+    
+    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
 
 
 # ============================================================================

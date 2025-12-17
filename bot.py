@@ -55,7 +55,7 @@ from handlers.super_admin import (
     super_user_edit_groups, super_user_toggle_group, super_user_groups_confirm, super_user_groups_cancel,
     super_user_ban, super_user_unban, super_user_delete, super_user_delete_confirm,
     super_add_user, super_user_select_group, super_user_id_input, super_user_name_input,
-    super_confirm_user, super_cancel_user,
+    super_confirm_user, super_cancel_user, super_my_groups,
     USER_NAME_INPUT, WAITING_GROUP_SELECT, USER_ID_INPUT, USER_CONFIRM,
     # Registration management
     super_view_registration_requests, super_review_registration_request,
@@ -175,6 +175,8 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             await super_back_to_group(update, context)
         elif data == "super_manage_users":
             return await super_manage_users(update, context)
+        elif data == "super_my_groups":
+            await super_my_groups(update, context)
         elif data.startswith("super_all_employees_page_"):
             await super_all_employees_page(update, context)
         elif data == "super_add_user":

@@ -1092,50 +1092,6 @@ def delete_group(group_id):
         conn.close()
 
 
-def add_user_to_group(user_id, name, group_id):
-    """
-    Add a user to a group.
-    
-    Args:
-        user_id (int): Telegram user ID
-        name (str): name
-        group_id (int): ID of the group
-        
-    Returns:
-        bool: True if added, False if user already exists or group doesn't exist
-    """
-    conn = _get_db_connection()
-    cursor = conn.cursor()
-    
-    try:
-        # Check if group exists
-        cursor.execute("SELECT group_id FROM groups WHERE group_id = %s", (group_id,))
-        if not cursor.fetchone():
-            logger.error(f"Group {group_id} does not exist")
-            conn.close()
-            return False
-        
-        # Check if user already exists
-        cursor.execute("SELECT user_id FROM users WHERE user_id = %s", (user_id,))
-        if cursor.fetchone():
-            logger.warning(f"user {user_id} already exists")
-            conn.close()
-            return False
-        
-        cursor.execute(
-            "INSERT INTO users (user_id, name, group_id) VALUES (%s, %s, %s)",
-            (user_id, name, group_id)
-        )
-        conn.commit()
-        conn.close()
-        logger.info(f"Added user {name} (ID: {user_id}) to group {group_id}")
-        return True
-    except Exception as e:
-        logger.error(f"Error adding user to group: {e}")
-        conn.close()
-        return False
-
-
 def get_group_users(group_id):
     """Get all users in a group (from user_groups many-to-many table)."""
     import time
