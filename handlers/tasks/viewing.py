@@ -17,6 +17,12 @@ async def view_task_detail(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     task_id = int(query.data.split("_")[-1])
     user_id = query.from_user.id
     
+    # Clear any editing state when viewing a task (cleanup from previous edits)
+    context.user_data.pop('editing_task_id', None)
+    context.user_data.pop('task_changes', None)
+    context.user_data.pop('task_selected_users', None)
+    context.user_data.pop('adding_media_to_task', None)
+    
     # Track where user came from if not already set (for back navigation)
     if 'task_view_source' not in context.user_data:
         # Try to determine source based on callback history or default to 'user_my_tasks'

@@ -77,7 +77,7 @@ async def show_edit_task_menu(update: Update, context: ContextTypes.DEFAULT_TYPE
         [InlineKeyboardButton("👥 Исполнители", callback_data=f"edit_task_field_users_{task_id}")],
         [
             InlineKeyboardButton("💾 Сохранить", callback_data=f"save_task_changes_{task_id}"),
-            InlineKeyboardButton("⬅️ Назад", callback_data=f"view_task_{task_id}")
+            InlineKeyboardButton("⬅️ Назад", callback_data=f"cancel_edit_{task_id}")
         ]
     ]
     
@@ -726,6 +726,29 @@ async def back_to_edit_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     
     await show_edit_task_menu(update, context, is_query=True)
     return EDIT_TASK_MENU
+
+
+async def cancel_task_editing(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Cancel editing and clean up session state."""
+    query = update.callback_query
+    await query.answer()
+    
+    task_id = context.user_data.get('editing_task_id')
+    
+    # Clear editing session completely
+    context.user_data.pop('editing_task_id', None)
+    context.user_data.pop('task_changes', None)
+    context.user_data.pop('task_selected_users', None)
+    context.user_data.pop('adding_media_to_task', None)
+    
+    if task_id:
+        # Return to task view
+        from handlers.tasks.viewing import view_task_detail
+        # Create a mock callback query with proper data
+        query.data = f"view_task_{task_id}"
+        await view_task_detail(update, context)
+    
+    return ConversationHandler.END
 
 
 async def save_task_changes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
