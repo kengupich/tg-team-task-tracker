@@ -1019,13 +1019,30 @@ def delete_task(task_id):
     cursor = conn.cursor()
     
     try:
-        # First, delete all media files associated with this task
+        # Delete in correct order to respect FK constraints
+        # 1. Delete task history (references tasks)
+        cursor.execute(
+            "DELETE FROM task_history WHERE task_id = %s",
+            (task_id,)
+        )
+        
+        # 2. Delete assignee statuses for this task (if table exists)
+        try:
+            cursor.execute(
+                "DELETE FROM assignee_status WHERE task_id = %s",
+                (task_id,)
+            )
+        except Exception:
+            # Table might not exist, ignore
+            pass
+        
+        # 3. Delete all media files associated with this task
         cursor.execute(
             "DELETE FROM task_media WHERE task_id = %s",
             (task_id,)
         )
         
-        # Delete the task
+        # 4. Delete the task
         cursor.execute(
             "DELETE FROM tasks WHERE task_id = %s",
             (task_id,)
