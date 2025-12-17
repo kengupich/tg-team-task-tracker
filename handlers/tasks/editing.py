@@ -387,13 +387,19 @@ async def edit_task_field_handler(update: Update, context: ContextTypes.DEFAULT_
     context.user_data['editing_field'] = field_name
     
     if field_name == "title":
+        keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data=f"back_to_edit_menu_{task_id}")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text(
-            "📝 Введите новое название задания:\n\n💡 Введите текст или нажмите /cancel для отмены"
+            "📝 Введите новое название задания:",
+            reply_markup=reply_markup
         )
         return EDIT_TASK_TITLE
     elif field_name == "description":
+        keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data=f"back_to_edit_menu_{task_id}")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text(
-            "📋 Введите новое описание задания:\n\n💡 Введите текст или нажмите /cancel для отмены"
+            "📋 Введите новое описание задания:",
+            reply_markup=reply_markup
         )
         return EDIT_TASK_DESCRIPTION
     elif field_name == "status":
