@@ -2,7 +2,7 @@
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes
 
-from database import user_exists, has_user_group, get_admin_groups, get_user_by_id
+from database import user_exists, add_user, has_user_group, get_admin_groups, get_user_by_id
 from utils.permissions import is_super_admin, is_group_admin
 
 
@@ -94,10 +94,16 @@ async def show_main_menu(user_id: int, user_name: str, update: Update, is_callba
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /start command - show role-specific menu or registration prompt."""
     user_id = update.effective_user.id
+    user_name = update.effective_user.first_name or "User"
+    user_username = update.effective_user.username
+    
+    # Ensure user exists in database
+    if not user_exists(user_id):
+        add_user(user_id, user_name, user_username)
     
     # Get user's name from database (or use Telegram first name as fallback)
     user = get_user_by_id(user_id)
-    user_name = user['name'] if user else update.effective_user.first_name
+    user_name = user['name'] if user else user_name
     
     await show_main_menu(user_id, user_name, update, is_callback=False)
 

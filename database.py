@@ -1347,32 +1347,48 @@ def get_users_for_task_assignment(creator_id, creator_is_super_admin, creator_is
             """
             cursor.execute(query, (creator_id,))
         else:
-            # Regular worker: users from worker's OWN groups + admins of those groups + super admins + ALWAYS include self
+            # Regular worker: users from worker's OWN groups + admins of those groups + ALWAYS include self
+            # First get worker's groups
             cursor.execute("""
-                SELECT DISTINCT u.user_id, u.name, u.username,
-                       STRING_AGG(DISTINCT g.group_id::text, ',') as group_ids,
-                       STRING_AGG(DISTINCT g.name, ',') as group_names
-                FROM users u
-                LEFT JOIN user_groups ug ON u.user_id = ug.user_id
-                LEFT JOIN groups g ON ug.group_id = g.group_id
-                WHERE u.banned = 0 AND u.deleted = 0 AND (
-                    u.user_id = %s
-                    OR ug.group_id IN (
-                        SELECT ug2.group_id FROM user_groups ug2 WHERE ug2.user_id = %s
-                    )
-                    OR u.user_id IN (
-                        SELECT ga.admin_id FROM group_admins ga
-                        WHERE ga.group_id IN (
-                            SELECT ug3.group_id FROM user_groups ug3 WHERE ug3.user_id = %s
+                SELECT DISTINCT group_id FROM user_groups WHERE user_id = %s
+            """, (creator_id,))
+            worker_groups = [row[0] for row in cursor.fetchall()]
+            
+            if worker_groups:
+                # Worker has groups - include users from those groups and admins
+                group_ids_str = ','.join(str(gid) for gid in worker_groups)
+                query = f"""
+                    SELECT DISTINCT u.user_id, u.name, u.username,
+                           STRING_AGG(DISTINCT g.group_id::text, ',') as group_ids,
+                           STRING_AGG(DISTINCT g.name, ',') as group_names
+                    FROM users u
+                    LEFT JOIN user_groups ug ON u.user_id = ug.user_id
+                    LEFT JOIN groups g ON ug.group_id = g.group_id
+                    WHERE u.banned = 0 AND u.deleted = 0 AND (
+                        u.user_id = %s
+                        OR ug.group_id IN ({group_ids_str})
+                        OR u.user_id IN (
+                            SELECT ga.admin_id FROM group_admins ga
+                            WHERE ga.group_id IN ({group_ids_str})
                         )
                     )
-                    OR u.user_id IN (
-                        SELECT super_admin_id FROM super_admins
-                    )
-                )
-                GROUP BY u.user_id, u.name, u.username
-                ORDER BY u.name
-            """, (creator_id, creator_id, creator_id))
+                    GROUP BY u.user_id, u.name, u.username
+                    ORDER BY u.name
+                """
+                cursor.execute(query, (creator_id,))
+            else:
+                # Worker has no groups - can only assign to themselves
+                cursor.execute("""
+                    SELECT DISTINCT u.user_id, u.name, u.username,
+                           STRING_AGG(DISTINCT g.group_id::text, ',') as group_ids,
+                           STRING_AGG(DISTINCT g.name, ',') as group_names
+                    FROM users u
+                    LEFT JOIN user_groups ug ON u.user_id = ug.user_id
+                    LEFT JOIN groups g ON ug.group_id = g.group_id
+                    WHERE u.banned = 0 AND u.deleted = 0 AND u.user_id = %s
+                    GROUP BY u.user_id, u.name, u.username
+                    ORDER BY u.name
+                """, (creator_id,))
         
         rows = cursor.fetchall()
         users = []
@@ -2259,10 +2275,14 @@ def approve_registration_request(request_id, reviewer_id):
             WHERE request_id = %s
         ''', (reviewer_id, request_id))
         
-        # Create user in users table with username
+        # Upsert user in users table - update if exists, insert if not
         cursor.execute('''
             INSERT INTO users (user_id, name, username, registered)
             VALUES (%s, %s, %s, 1)
+            ON CONFLICT (user_id) DO UPDATE 
+            SET name = COALESCE(EXCLUDED.name, users.name),
+                username = COALESCE(EXCLUDED.username, users.username),
+                registered = 1
         ''', (user_id, name, username))
         
         conn.commit()

@@ -7,7 +7,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, ConversationHandler
 
 from database import (
-    get_all_groups, get_all_users, get_user_by_id, user_exists,
+    get_all_groups, get_all_users, get_user_by_id, user_exists, add_user,
     add_task_media, get_users_for_task_assignment, get_admin_groups, create_task as db_create_task
 )
 from utils.permissions import is_super_admin, is_group_admin, get_user_group_id
@@ -248,6 +248,12 @@ async def show_users_step(update: Update, context: ContextTypes.DEFAULT_TYPE, is
     
     # Get creator ID and determine their permissions
     creator_id = task_data.get("admin_id")
+    
+    # Ensure creator user exists in database (required for proper task assignment queries)
+    if not user_exists(creator_id):
+        user_name = update.callback_query.from_user.first_name if hasattr(update, 'callback_query') and update.callback_query else "User"
+        add_user(creator_id, user_name, None)
+    
     creator_is_super = is_super_admin(creator_id)
     creator_is_admin = is_group_admin(creator_id)
     

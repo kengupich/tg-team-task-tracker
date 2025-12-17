@@ -5,7 +5,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, ConversationHandler
 
 from database import (
-    get_task_by_id, update_task_status, delete_task, get_user_by_id,
+    get_task_by_id, update_task_status, delete_task, get_user_by_id, user_exists, add_user,
     get_task_media, remove_task_media, add_task_media, get_all_users,
     get_users_for_task_assignment, get_admin_groups, update_task_field,
     update_assignee_status, get_assignee_status, calculate_task_status,
@@ -651,6 +651,11 @@ async def show_users_edit_menu(update: Update, context: ContextTypes.DEFAULT_TYP
     task_id = context.user_data.get('editing_task_id')
     user_id = query.from_user.id
     task = get_task_by_id(task_id)
+    
+    # Ensure user exists in database (required for proper task assignment queries)
+    if not user_exists(user_id):
+        user_name = query.from_user.first_name if query.from_user.first_name else "User"
+        add_user(user_id, user_name, None)
     
     # Get available users based on creator's role
     if is_super_admin(user_id):
