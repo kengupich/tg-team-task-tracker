@@ -781,6 +781,16 @@ def add_group_admin(group_id, admin_id):
             # Already exists due to UNIQUE constraint
             pass
         
+        # Also add to user_groups so admin can be seen as a member of the group
+        try:
+            cursor.execute(
+                "INSERT INTO user_groups (user_id, group_id) VALUES (%s, %s)",
+                (admin_id, group_id)
+            )
+        except Exception:
+            # Already exists due to UNIQUE constraint
+            pass
+        
         # Also update legacy admin_id field in groups table for backward compatibility
         cursor.execute("SELECT admin_id FROM groups WHERE group_id = %s", (group_id,))
         current_admin = cursor.fetchone()[0]
