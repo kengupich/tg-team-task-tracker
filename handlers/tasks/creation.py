@@ -8,11 +8,13 @@ from telegram.ext import ContextTypes, ConversationHandler
 
 from database import (
     get_all_groups, get_all_users, get_user_by_id, user_exists,
-    add_task_media, get_users_for_task_assignment, get_admin_groups
+    add_task_media, get_users_for_task_assignment, get_admin_groups, create_task as db_create_task
 )
 from utils.permissions import is_super_admin, is_group_admin, get_user_group_id
 from utils.helpers import generate_calendar, UKR_MONTHS, TIME_OPTIONS
-from handlers.notifications import send_task_assignment_notification
+from handlers.notifications import (
+    send_task_assignment_notification, send_task_notification_to_admins
+)
 
 logger = logging.getLogger(__name__)
 
@@ -586,7 +588,6 @@ async def task_confirm_users(update: Update, context: ContextTypes.DEFAULT_TYPE)
             group_id = groups[0]['group_id']
     
     # Create task using database function (avoid name collision with bot.create_task)
-    from database import create_task as db_create_task
     task_id = db_create_task(
         date=task_data["date"],
         time=task_data["time"],
@@ -613,6 +614,8 @@ async def task_confirm_users(update: Update, context: ContextTypes.DEFAULT_TYPE)
         
         # Send notifications to assigned users
         task_desc = title  # Use title for notification
+        notification_count = 0
+        
         for user_id in assigned_users:
             await send_task_assignment_notification(
                 context,
@@ -620,13 +623,30 @@ async def task_confirm_users(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 task_id,
                 task_desc,
                 task_data["date"],
-                task_data["time"]
+                task_data["time"],
+                role="assignee"
             )
+            notification_count += 1
+        
+        # Send notifications to super admin and group admins
+        await send_task_notification_to_admins(
+            context,
+            task_id,
+            task_desc,
+            task_data["date"],
+            task_data["time"]
+        )
+        
+        # Get admin recipients for count
+        from database import get_notification_recipients
+        recipients = get_notification_recipients(task_id, include_assignees=False)
+        admin_count = len(recipients['super_admin_ids']) + len(recipients['admins'])
         
         await query.edit_message_text(
             f"✅ Задание успешно создано!\nID задания: {task_id}\n"
-            f"Назначено исполнителей: {len(assigned_users)}\n\n"
-            f"📧 Отправлено {len(assigned_users)} уведомлений",
+            f"Назначено исполнителей: {len(assigned_users)}\n"
+            f"Уведомлено администраторов: {admin_count}\n\n"
+            f"📧 Отправлено {notification_count + admin_count} уведомлений",
             reply_markup=reply_markup
         )
     else:

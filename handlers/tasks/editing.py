@@ -11,7 +11,9 @@ from database import (
     update_assignee_status, get_assignee_status, calculate_task_status
 )
 from utils.permissions import can_edit_task, is_super_admin, is_group_admin
-from handlers.notifications import send_status_change_notification
+from handlers.notifications import (
+    send_status_change_notification, send_status_change_notification_to_all_admins
+)
 
 logger = logging.getLogger(__name__)
 
@@ -318,7 +320,7 @@ async def set_task_status_handler(update: Update, context: ContextTypes.DEFAULT_
             'completed': '✅ Завершено'
         }.get(new_status, new_status)
         
-        # Send notification to admin if status changed
+        # Send notification to admin and all group admins if status changed
         notification_sent = False
         if old_status != new_status and admin_id and admin_id != user_id:
             logger.info(f"Preparing to send notification: old_status={old_status} != new_status={new_status}, admin_id={admin_id} != user_id={user_id}")
@@ -326,14 +328,15 @@ async def set_task_status_handler(update: Update, context: ContextTypes.DEFAULT_
             user_name = user['name'] if user else 'Неизвестный сотрудник'
             task_desc = task.get('title') or task['description'].split('\n')[0]  # Use title or first line of description
             
-            await send_status_change_notification(
+            # Send to task creator and all admins
+            await send_status_change_notification_to_all_admins(
                 context,
-                admin_id,
                 task_id,
                 task_desc,
                 old_status,
                 new_status,
-                user_name
+                user_name,
+                task_creator_id=admin_id
             )
             notification_sent = True
         else:

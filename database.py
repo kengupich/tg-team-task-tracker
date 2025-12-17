@@ -2560,6 +2560,99 @@ def remove_task_assignee(task_id, user_id):
         return False
 
 
+def get_notification_recipients(task_id, include_assignees=True):
+    """
+    Get all users who should receive notifications for a task.
+    
+    This includes:
+    1. Task creator
+    2. All assigned users (if include_assignees=True)
+    3. Super admin (always gets notifications as invisible creator)
+    4. All group admins for the task's group (as invisible creators)
+    
+    Returns a dict with users grouped by their role:
+    {
+        'creator': creator_id,
+        'assignees': [list of user_ids],
+        'admins': [list of admin_ids],
+        'super_admin_ids': [list of super_admin_ids from SUPER_ADMIN_IDS]
+    }
+    
+    Args:
+        task_id (int): ID of the task
+        include_assignees (bool): Whether to include assigned users
+        
+    Returns:
+        dict: Dictionary with recipient information
+    """
+    import json
+    import os
+    from dotenv import load_dotenv
+    
+    # Load super admin IDs from environment
+    load_dotenv()
+    super_admin_ids_str = os.getenv("SUPER_ADMIN_ID", "0")
+    super_admin_ids = [
+        int(id.strip()) for id in super_admin_ids_str.split(",") if id.strip()
+    ]
+    
+    conn = _get_db_connection()
+    cursor = conn.cursor()
+    
+    try:
+        # Get task info (creator, group_id, assigned_to_list)
+        cursor.execute(
+            """SELECT created_by, group_id, assigned_to_list 
+               FROM tasks WHERE task_id = %s""",
+            (task_id,)
+        )
+        result = cursor.fetchone()
+        
+        if not result:
+            conn.close()
+            return {
+                'creator': None,
+                'assignees': [],
+                'admins': [],
+                'super_admin_ids': super_admin_ids
+            }
+        
+        creator_id, group_id, assigned_to_json = result
+        
+        # Parse assigned_to_list
+        assignees = []
+        if include_assignees and assigned_to_json:
+            try:
+                assignees = json.loads(assigned_to_json)
+            except json.JSONDecodeError:
+                assignees = []
+        
+        # Get group admins for this task's group
+        cursor.execute(
+            """SELECT admin_id FROM group_admins WHERE group_id = %s""",
+            (group_id,)
+        )
+        group_admins = [row[0] for row in cursor.fetchall()]
+        
+        conn.close()
+        
+        return {
+            'creator': creator_id,
+            'assignees': assignees,
+            'admins': group_admins,
+            'super_admin_ids': super_admin_ids
+        }
+    except Exception as e:
+        logger.error(f"Error getting notification recipients for task {task_id}: {e}")
+        conn.close()
+        return {
+            'creator': None,
+            'assignees': [],
+            'admins': [],
+            'super_admin_ids': super_admin_ids
+        }
+
+
 
 
 
