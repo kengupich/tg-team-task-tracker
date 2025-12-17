@@ -85,7 +85,7 @@ from handlers.tasks import (
     edit_task_handler, edit_task_field_handler, edit_title_input, edit_description_input,
     show_status_edit_menu, edit_status_select, show_media_edit_menu, edit_media_delete,
     delete_media_file, edit_media_add, handle_edit_media_file,
-    show_users_edit_menu, edit_toggle_user, edit_users_done, back_to_edit_menu, cancel_task_editing, save_task_changes,
+    show_users_edit_menu, edit_toggle_user, edit_users_done, back_to_edit_menu, exit_task_editing,
     delete_task_handler, delete_task_confirm_handler,
     change_task_status_handler, set_task_status_handler,
     EDIT_TASK_MENU, EDIT_TASK_TITLE, EDIT_TASK_DESCRIPTION, EDIT_TASK_MEDIA,
@@ -469,24 +469,20 @@ def start_bot():
         per_message=False,
         states={
             EDIT_TASK_MENU: [
+                CallbackQueryHandler(exit_task_editing, pattern="^exit_task_editing_.*"),
                 CallbackQueryHandler(edit_task_field_handler, pattern="^edit_task_field_.*"),
-                CallbackQueryHandler(save_task_changes, pattern="^save_task_changes_.*"),
-                CallbackQueryHandler(cancel_task_editing, pattern="^cancel_edit_.*"),
                 CallbackQueryHandler(back_to_edit_menu, pattern="^back_to_edit_menu_.*"),
             ],
             EDIT_TASK_TITLE: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, edit_title_input),
-                CallbackQueryHandler(cancel_task_editing, pattern="^cancel_edit_.*"),
                 CallbackQueryHandler(back_to_edit_menu, pattern="^back_to_edit_menu_.*"),
             ],
             EDIT_TASK_DESCRIPTION: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, edit_description_input),
-                CallbackQueryHandler(cancel_task_editing, pattern="^cancel_edit_.*"),
                 CallbackQueryHandler(back_to_edit_menu, pattern="^back_to_edit_menu_.*"),
             ],
             EDIT_TASK_STATUS: [
                 CallbackQueryHandler(edit_status_select, pattern="^edit_status_select_.*"),
-                CallbackQueryHandler(cancel_task_editing, pattern="^cancel_edit_.*"),
                 CallbackQueryHandler(back_to_edit_menu, pattern="^back_to_edit_menu_.*"),
             ],
             EDIT_TASK_MEDIA: [
@@ -494,13 +490,11 @@ def start_bot():
                 CallbackQueryHandler(delete_media_file, pattern="^delete_media_file_.*"),
                 CallbackQueryHandler(edit_media_add, pattern="^edit_media_add_.*"),
                 MessageHandler(filters.PHOTO | filters.VIDEO, handle_edit_media_file),
-                CallbackQueryHandler(cancel_task_editing, pattern="^cancel_edit_.*"),
                 CallbackQueryHandler(back_to_edit_menu, pattern="^back_to_edit_menu_.*"),
             ],
             EDIT_TASK_USERS: [
                 CallbackQueryHandler(edit_toggle_user, pattern="^edit_toggle_user_.*"),
                 CallbackQueryHandler(edit_users_done, pattern="^edit_users_done_.*"),
-                CallbackQueryHandler(cancel_task_editing, pattern="^cancel_edit_.*"),
                 CallbackQueryHandler(back_to_edit_menu, pattern="^back_to_edit_menu_.*"),
             ],
         },

@@ -8,9 +8,11 @@ from database import (
     get_task_by_id, update_task_status, delete_task, get_user_by_id,
     get_task_media, remove_task_media, add_task_media, get_all_users,
     get_users_for_task_assignment, get_admin_groups, update_task_field,
-    update_assignee_status, get_assignee_status, calculate_task_status
+    update_assignee_status, get_assignee_status, calculate_task_status,
+    get_task_assignee_statuses, get_group
 )
 from utils.permissions import can_edit_task, is_super_admin, is_group_admin
+from utils.helpers import format_task_status
 from handlers.notifications import (
     send_status_change_notification, send_status_change_notification_to_all_admins
 )
@@ -78,8 +80,7 @@ async def show_edit_task_menu(update: Update, context: ContextTypes.DEFAULT_TYPE
         [InlineKeyboardButton(f"{status_emoji} Статус", callback_data=f"edit_task_field_status_{task_id}")],
         [InlineKeyboardButton("👥 Исполнители", callback_data=f"edit_task_field_users_{task_id}")],
         [
-            InlineKeyboardButton("💾 Сохранить", callback_data=f"save_task_changes_{task_id}"),
-            InlineKeyboardButton("⬅️ Назад", callback_data=f"cancel_edit_{task_id}")
+            InlineKeyboardButton("⬅️ Назад", callback_data=f"exit_task_editing_{task_id}")
         ]
     ]
     
@@ -382,15 +383,23 @@ async def edit_task_field_handler(update: Update, context: ContextTypes.DEFAULT_
     task_id = int(parts[4])
     
     context.user_data['editing_task_id'] = task_id
+    # Mark that we're in a field edit submenu (for back navigation logic)
+    context.user_data['editing_field'] = field_name
     
     if field_name == "title":
+        keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data=f"back_to_edit_menu_{task_id}")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text(
-            "📝 Введите новое название задания:"
+            "📝 Введите новое название задания:",
+            reply_markup=reply_markup
         )
         return EDIT_TASK_TITLE
     elif field_name == "description":
+        keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data=f"back_to_edit_menu_{task_id}")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text(
-            "📋 Введите новое описание задания:"
+            "📋 Введите новое описание задания:",
+            reply_markup=reply_markup
         )
         return EDIT_TASK_DESCRIPTION
     elif field_name == "status":
@@ -416,8 +425,13 @@ async def edit_title_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await update.message.reply_text("❌ Название не может быть пустым")
         return EDIT_TASK_TITLE
     
+    # Save the change
     context.user_data['task_changes']['title'] = new_title
     
+    # Clear field editing marker
+    context.user_data.pop('editing_field', None)
+    
+    # Return to main edit menu
     await show_edit_task_menu(update, context, is_query=False)
     return EDIT_TASK_MENU
 
@@ -431,8 +445,13 @@ async def edit_description_input(update: Update, context: ContextTypes.DEFAULT_T
         await update.message.reply_text("❌ Описание слишком длинное (максимум 2000 символов)")
         return EDIT_TASK_DESCRIPTION
     
+    # Save the change
     context.user_data['task_changes']['description'] = new_description
     
+    # Clear field editing marker
+    context.user_data.pop('editing_field', None)
+    
+    # Return to main edit menu
     await show_edit_task_menu(update, context, is_query=False)
     return EDIT_TASK_MENU
 
@@ -733,83 +752,128 @@ async def edit_users_done(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 
 async def back_to_edit_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Go back to edit menu."""
+    """Go back to edit menu (for sub-menus like status, media, users)."""
     query = update.callback_query
     await query.answer()
     
+    # Clear field editing marker when navigating back
+    context.user_data.pop('editing_field', None)
+    
+    # Navigate back to main edit menu
     await show_edit_task_menu(update, context, is_query=True)
     return EDIT_TASK_MENU
 
 
-async def cancel_task_editing(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Cancel editing and clean up session state."""
+async def exit_task_editing(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Exit editing and return to task view."""
     query = update.callback_query
     await query.answer()
     
     task_id = context.user_data.get('editing_task_id')
     
-    # Clear editing session completely
+    # Clear editing session
     context.user_data.pop('editing_task_id', None)
     context.user_data.pop('task_changes', None)
     context.user_data.pop('task_selected_users', None)
     context.user_data.pop('adding_media_to_task', None)
+    context.user_data.pop('editing_field', None)
     
+    # Show task view
     if task_id:
-        # Return to task view
-        from handlers.tasks.viewing import view_task_detail
-        # Create a mock callback query with proper data
-        query.data = f"view_task_{task_id}"
-        await view_task_detail(update, context)
+        try:
+            task = get_task_by_id(task_id)
+            if task:
+                user_id = query.from_user.id
+                group = get_group(task['group_id'])
+                group_name = group['name'] if group else 'Неизвестно'
+                
+                creator = get_user_by_id(task.get('created_by')) if task.get('created_by') else None
+                creator_name = creator['name'] if creator else 'Неизвестно'
+                
+                assigned_ids = json.loads(task.get('assigned_to_list') or '[]')
+                assignee_statuses = get_task_assignee_statuses(task_id)
+                
+                assigned_users = []
+                for uid in assigned_ids:
+                    u = get_user_by_id(uid)
+                    if u:
+                        user_status = assignee_statuses.get(uid, 'pending')
+                        status_emoji = {
+                            'pending': '⏳',
+                            'in_progress': '🔄',
+                            'completed': '✅',
+                            'cancelled': '❌'
+                        }.get(user_status, '❓')
+                        assigned_users.append(f"{status_emoji} {u['name']}")
+                
+                status_text = format_task_status(task['status'])
+                task_info = f"📋 ЗАДАНИЕ #{task['task_id']}\n\n"
+                
+                title = task.get('title', '').strip()
+                if title:
+                    task_info += f"📝 Название:\n{title}\n\n"
+                
+                task_info += (
+                    f"📅 Дата: {task['date']}\n"
+                    f"🕐 Дедлайн: {task['time']}\n"
+                    f"📍 Отдел: {group_name}\n"
+                    f"📊 Общий статус: {status_text}\n"
+                    f"👤 Постановщик: {creator_name}\n\n"
+                )
+                
+                description = task.get('description', '').strip()
+                if description:
+                    task_info += f"📋 Описание:\n{description}\n\n"
+                
+                if assigned_users:
+                    task_info += f"👥 Исполнители ({len(assigned_users)}):\n"
+                    for name_with_status in assigned_users[:5]:
+                        task_info += f"  {name_with_status}\n"
+                    if len(assigned_users) > 5:
+                        task_info += f"  ... и еще {len(assigned_users) - 5}\n"
+                else:
+                    task_info += "👥 Никто не назначен\n"
+                
+                media_files = get_task_media(task_id) if task.get('has_media') else []
+                if media_files:
+                    task_info += f"\n📎 Медиа файлов: {len(media_files)}\n"
+                
+                keyboard = []
+                if media_files:
+                    keyboard.append([InlineKeyboardButton("📷 Просмотреть медиа", callback_data=f"view_task_media_{task_id}")])
+                
+                can_edit = can_edit_task(user_id, task)
+                is_assigned = user_id in assigned_ids
+                
+                if can_edit:
+                    keyboard.append([InlineKeyboardButton("✏️ Редактировать", callback_data=f"edit_task_{task_id}")])
+                    keyboard.append([InlineKeyboardButton("🗑️ Удалить", callback_data=f"delete_task_{task_id}")])
+                    if is_assigned:
+                        keyboard.append([InlineKeyboardButton("🔄 Изменить статус", callback_data=f"change_task_status_{task_id}")])
+                else:
+                    if is_assigned:
+                        keyboard.append([InlineKeyboardButton("🔄 Изменить статус", callback_data=f"change_task_status_{task_id}")])
+                
+                back_callback = 'user_my_tasks'
+                back_text = "⬅️ К моим заданиям"
+                if is_super_admin(user_id):
+                    back_callback = 'super_manage_tasks'
+                    back_text = "⬅️ К списку заданий"
+                elif is_group_admin(user_id) and not is_assigned:
+                    back_callback = 'admin_view_tasks'
+                    back_text = "⬅️ К списку заданий"
+                
+                keyboard.append([InlineKeyboardButton(back_text, callback_data=back_callback)])
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                
+                await query.edit_message_text(task_info, reply_markup=reply_markup)
+                return ConversationHandler.END
+        except Exception as e:
+            logger.error(f"Error showing task after edit exit: {e}")
+            await query.edit_message_text("❌ Ошибка при отображении задания.", reply_markup=None)
+            return ConversationHandler.END
     
     return ConversationHandler.END
 
 
-async def save_task_changes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Save all changes and apply them to task."""
-    query = update.callback_query
-    await query.answer()
-    
-    task_id = context.user_data.get('editing_task_id')
-    changes = context.user_data.get('task_changes', {})
-    
-    if not changes:
-        await query.answer("ℹ️ Нет изменений для сохранения", show_alert=True)
-        return EDIT_TASK_MENU
-    
-    task = get_task_by_id(task_id)
-    
-    try:
-        # Update title
-        if 'title' in changes:
-            update_task_field(task_id, 'title', changes['title'])
-        
-        # Update description
-        if 'description' in changes:
-            update_task_field(task_id, 'description', changes['description'])
-        
-        # Update status
-        if 'status' in changes:
-            update_task_status(task_id, changes['status'])
-        
-        # Update assigned users
-        if 'assigned_users' in changes:
-            update_task_field(task_id, 'assigned_to_list', json.dumps(changes['assigned_users']))
-        
-        # Clear editing session
-        context.user_data.pop('editing_task_id', None)
-        context.user_data.pop('task_changes', None)
-        
-        keyboard = [[InlineKeyboardButton("⬅️ К заданию", callback_data=f"view_task_{task_id}")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await query.edit_message_text(
-            f"✅ Задание #{task_id} успешно обновлено!",
-            reply_markup=reply_markup
-        )
-        
-        return ConversationHandler.END
-    
-    except Exception as e:
-        logger.error(f"Error saving task changes: {e}")
-        await query.answer("❌ Ошибка при сохранении", show_alert=True)
-        return EDIT_TASK_MENU
+
