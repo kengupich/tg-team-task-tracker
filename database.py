@@ -1342,7 +1342,7 @@ def get_users_for_task_assignment(creator_id, creator_is_super_admin, creator_is
             """
             cursor.execute(query, (creator_id,))
         else:
-            # Regular worker: users from worker's OWN groups + admins of those groups + ALWAYS include self
+            # Regular worker: users from worker's OWN groups + admins of those groups + super admins + ALWAYS include self
             cursor.execute("""
                 SELECT DISTINCT u.user_id, u.name, u.username,
                        STRING_AGG(DISTINCT g.group_id::text, ',') as group_ids,
@@ -1360,6 +1360,9 @@ def get_users_for_task_assignment(creator_id, creator_is_super_admin, creator_is
                         WHERE ga.group_id IN (
                             SELECT ug3.group_id FROM user_groups ug3 WHERE ug3.user_id = %s
                         )
+                    )
+                    OR u.user_id IN (
+                        SELECT super_admin_id FROM super_admins
                     )
                 )
                 GROUP BY u.user_id, u.name, u.username
