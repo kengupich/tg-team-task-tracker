@@ -2,7 +2,7 @@
 import logging
 from telegram import InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes
-from datetime import datetime
+from datetime import datetime, timedelta
 from database import (
     get_all_groups, get_group_tasks, get_task_by_id, 
     get_notification_recipients, get_user_by_id
@@ -222,8 +222,17 @@ async def send_deadline_reminder(context: ContextTypes.DEFAULT_TYPE) -> None:
                 
                 # Parse deadline
                 try:
-                    deadline_str = f"{task['date']} {task['time']}"
-                    deadline = datetime.strptime(deadline_str, "%Y-%m-%d %H:%M")
+                    # Handle 24:00 (midnight of next day)
+                    time_str = task['time']
+                    date_str = task['date']
+                    
+                    if time_str == "24:00":
+                        # Convert 24:00 to 00:00 of next day
+                        deadline = datetime.strptime(date_str, "%Y-%m-%d")
+                        deadline = deadline.replace(hour=0, minute=0) + timedelta(days=1)
+                    else:
+                        deadline_str = f"{date_str} {time_str}"
+                        deadline = datetime.strptime(deadline_str, "%Y-%m-%d %H:%M")
                 except Exception as e:
                     logger.error(f"Error parsing deadline for task {task['task_id']}: {e}")
                     continue
