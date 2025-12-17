@@ -44,13 +44,37 @@ def get_status_emoji(status: str) -> str:
     return emoji_map.get(status, '📌')
 
 
-def format_task_button(task: dict) -> InlineKeyboardButton:
-    """Create a standardized task button."""
+def get_task_display_text(task: dict) -> str:
+    """
+    Get display text for task in list/filter views.
+    Priority: title > description
+    Returns text truncated to 40 chars, cannot be empty.
+    """
+    text = task.get('title') or ''
+    if not text:
+        text = f"Task #{task.get('task_id', '?')}"
+    return (text[:40] + '...') if len(text) > 40 else text
+
+
+def format_task_button(task: dict, show_date: bool = True) -> InlineKeyboardButton:
+    """
+    Create a standardized task button with proper text formatting.
+    
+    Args:
+        task: Task dictionary with keys: status, task_id, title, description, date (optional)
+        show_date: If True, show date instead of task_id
+    
+    Returns:
+        InlineKeyboardButton with formatted task display
+    """
     status_emoji = get_status_emoji(task['status'])
-    desc = task['description'][:40] + '...' if len(task['description']) > 40 else task['description']
+    display_text = get_task_display_text(task)
+    
+    # Use date if available and requested, otherwise use task_id
+    suffix = task.get('task_id')
     
     return InlineKeyboardButton(
-        f"{status_emoji} {desc} ({task['date']})",
+        f"{status_emoji} {display_text} ({suffix})",
         callback_data=f"view_task_{task['task_id']}"
     )
 

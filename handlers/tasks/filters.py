@@ -9,7 +9,7 @@ from database import (
     get_admin_groups, get_user_by_id, get_group_users
 )
 from utils.permissions import is_super_admin, is_group_admin
-from utils.helpers import get_status_emoji, format_task_status
+from utils.helpers import get_status_emoji, format_task_status, format_task_button
 
 logger = logging.getLogger(__name__)
 
@@ -72,19 +72,10 @@ async def filter_tasks_created(update: Update, context: ContextTypes.DEFAULT_TYP
         )
         return
     
-    keyboard = []
-    for task in tasks[:20]:
-        status_emoji = get_status_emoji(task['status'])
-        
-        text = task.get('title') or task.get('description') or ''
-        desc = (text[:40] + '...') if len(text) > 40 else text
-        keyboard.append([
-            InlineKeyboardButton(
-                f"{status_emoji} {desc} ({task['task_id']})",
-                callback_data=f"view_task_{task['task_id']}"
-            )
-        ])
-    
+    keyboard = [
+        [format_task_button(task, show_date=False)]
+        for task in tasks[:20]
+    ]
     keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="view_tasks_menu")])
     await query.edit_message_text(
         f"📤 Поручил ({len(tasks)}):\n\nВыберите задачу для просмотра:",
@@ -108,19 +99,10 @@ async def filter_tasks_assigned(update: Update, context: ContextTypes.DEFAULT_TY
         )
         return
     
-    keyboard = []
-    for task in tasks[:20]:
-        status_emoji = get_status_emoji(task['status'])
-        
-        text = task.get('title') or task.get('description') or ''
-        desc = (text[:40] + '...') if len(text) > 40 else text
-        keyboard.append([
-            InlineKeyboardButton(
-                f"{status_emoji} {desc} ({task['date']})",
-                callback_data=f"view_task_{task['task_id']}"
-            )
-        ])
-    
+    keyboard = [
+        [format_task_button(task)]
+        for task in tasks[:20]
+    ]
     keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="view_tasks_menu")])
     await query.edit_message_text(
         f"📥 Выполняю ({len(tasks)}):\n\nВыберите задачу для просмотра:",
@@ -250,19 +232,10 @@ async def filter_group_all_tasks(update: Update, context: ContextTypes.DEFAULT_T
         )
         return
     
-    keyboard = []
-    for task in tasks[:20]:
-        status_emoji = get_status_emoji(task['status'])
-        
-        text = task.get('title') or task.get('description') or ''
-        desc = (text[:40] + '...') if len(text) > 40 else text
-        keyboard.append([
-            InlineKeyboardButton(
-                f"{status_emoji} {desc} ({task['date']})",
-                callback_data=f"view_task_{task['task_id']}"
-            )
-        ])
-    
+    keyboard = [
+        [format_task_button(task)]
+        for task in tasks[:20]
+    ]
     keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data=f"filter_tasks_group_{group_id}")])
     await query.edit_message_text(
         f"📂 {group_name} - Все задачи ({len(tasks)}):\n\nВыберите задачу для просмотра:",
@@ -300,19 +273,10 @@ async def filter_tasks_by_assignee(update: Update, context: ContextTypes.DEFAULT
         )
         return
     
-    keyboard = []
-    for task in tasks[:20]:
-        status_emoji = get_status_emoji(task['status'])
-        
-        text = task.get('title') or task.get('description') or ''
-        desc = (text[:40] + '...') if len(text) > 40 else text
-        keyboard.append([
-            InlineKeyboardButton(
-                f"{status_emoji} {desc} ({task['date']})",
-                callback_data=f"view_task_{task['task_id']}"
-            )
-        ])
-    
+    keyboard = [
+        [format_task_button(task)]
+        for task in tasks[:20]
+    ]
     keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data=f"filter_tasks_group_{group_id}")])
     await query.edit_message_text(
         f"📂 {group_name}\n👤 {assignee_name} ({len(tasks)}):\n\nВыберите задачу для просмотра:",
@@ -361,19 +325,10 @@ async def filter_tasks_all(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     message_text += f"✅ Завершены: {len(tasks_by_status['completed'])}\n\n"
     message_text += "Выберите задачу для просмотра:"
     
-    keyboard = []
-    for task in tasks[:20]:
-        status_emoji = get_status_emoji(task['status'])
-        
-        text = task.get('title') or task.get('description') or ''
-        desc = (text[:40] + '...') if len(text) > 40 else text
-        keyboard.append([
-            InlineKeyboardButton(
-                f"{status_emoji} {desc} ({task['date']})",
-                callback_data=f"view_task_{task['task_id']}"
-            )
-        ])
-    
+    keyboard = [
+        [format_task_button(task)]
+        for task in tasks[:20]
+    ]
     keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="view_tasks_menu")])
     await query.edit_message_text(
         message_text,
@@ -433,16 +388,10 @@ async def filter_archived_created(update: Update, context: ContextTypes.DEFAULT_
     end_idx = start_idx + page_size
     page_tasks = tasks[start_idx:end_idx]
     
-    keyboard = []
-    for task in page_tasks:
-        text = task.get('title') or task.get('description') or ''
-        desc = (text[:40] + '...') if len(text) > 40 else text
-        keyboard.append([
-            InlineKeyboardButton(
-                f"✅ {desc} ({task['date']})",
-                callback_data=f"view_task_{task['task_id']}"
-            )
-        ])
+    keyboard = [
+        [format_task_button(task)]
+        for task in page_tasks
+    ]
     
     # Pagination buttons
     nav_buttons = []
@@ -497,16 +446,10 @@ async def filter_archived_assigned(update: Update, context: ContextTypes.DEFAULT
     end_idx = start_idx + page_size
     page_tasks = tasks[start_idx:end_idx]
     
-    keyboard = []
-    for task in page_tasks:
-        text = task.get('title') or task.get('description') or ''
-        desc = (text[:40] + '...') if len(text) > 40 else text
-        keyboard.append([
-            InlineKeyboardButton(
-                f"✅ {desc} ({task['date']})",
-                callback_data=f"view_task_{task['task_id']}"
-            )
-        ])
+    keyboard = [
+        [format_task_button(task)]
+        for task in page_tasks
+    ]
     
     # Pagination buttons
     nav_buttons = []
