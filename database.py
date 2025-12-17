@@ -1221,6 +1221,11 @@ def add_user_to_group(user_id, group_id):
     conn = _get_db_connection()
     cursor = conn.cursor()
     try:
+        # Ensure user exists in users table (required for FK constraint)
+        if not user_exists(user_id):
+            logger.warning(f"User {user_id} does not exist, creating user entry")
+            add_user(user_id, f"User_{user_id}", None)
+        
         cursor.execute(
             "INSERT INTO user_groups (user_id, group_id) VALUES (%s, %s)",
             (user_id, group_id)
