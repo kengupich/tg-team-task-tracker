@@ -32,9 +32,9 @@ async def show_main_menu(user_id: int, user_name: str, update: Update, is_callba
         reply_markup = InlineKeyboardMarkup(keyboard)
         text = f"🔐 Приветствую, {user_name}!\n\nГлавное меню:"
 
-        if is_callback:
+        if is_callback and update.callback_query:
             await update.callback_query.edit_message_text(text, reply_markup=reply_markup)
-        else:
+        elif update.message:
             await update.message.reply_text(text, reply_markup=reply_markup)
 
     # Check if user is Group Admin
@@ -53,9 +53,9 @@ async def show_main_menu(user_id: int, user_name: str, update: Update, is_callba
         reply_markup = InlineKeyboardMarkup(keyboard)
         text = f"👋 Приветствую, {user_name}!\nОтделы: {group_names}\n\nГлавное меню:"
 
-        if is_callback:
+        if is_callback and update.callback_query:
             await update.callback_query.edit_message_text(text, reply_markup=reply_markup)
-        else:
+        elif update.message:
             await update.message.reply_text(text, reply_markup=reply_markup)
 
     # Regular user/worker
@@ -70,9 +70,9 @@ async def show_main_menu(user_id: int, user_name: str, update: Update, is_callba
             reply_markup = InlineKeyboardMarkup(keyboard)
             text = f"Вы не зарегистрированы. Нажмите ниже, чтобы подать заявку на регистрацию:"
 
-            if is_callback:
+            if is_callback and update.callback_query:
                 await update.callback_query.edit_message_text(text, reply_markup=reply_markup)
-            else:
+            elif update.message:
                 await update.message.reply_text(text, reply_markup=reply_markup)
 
         elif reg_request['status'] == 'pending':
@@ -82,9 +82,9 @@ async def show_main_menu(user_id: int, user_name: str, update: Update, is_callba
                 f"Пожалуйста, дождитесь одобрения."
             )
 
-            if is_callback:
+            if is_callback and update.callback_query:
                 await update.callback_query.edit_message_text(text)
-            else:
+            elif update.message:
                 await update.message.reply_text(text)
 
         elif reg_request['status'] == 'rejected':
@@ -94,9 +94,9 @@ async def show_main_menu(user_id: int, user_name: str, update: Update, is_callba
                 f"Пожалуйста, свяжитесь с администратором для уточнения деталей."
             )
 
-            if is_callback:
+            if is_callback and update.callback_query:
                 await update.callback_query.edit_message_text(text)
-            else:
+            elif update.message:
                 await update.message.reply_text(text)
 
         elif reg_request['status'] == 'approved':
@@ -107,9 +107,9 @@ async def show_main_menu(user_id: int, user_name: str, update: Update, is_callba
                     f"Пожалуйста, свяжитесь с администратором, чтобы вас добавили в отдел."
                 )
 
-                if is_callback:
+                if is_callback and update.callback_query:
                     await update.callback_query.edit_message_text(text)
-                else:
+                elif update.message:
                     await update.message.reply_text(text)
             else:
                 # Approved and assigned to group - show tasks
@@ -122,23 +122,25 @@ async def show_main_menu(user_id: int, user_name: str, update: Update, is_callba
                 reply_markup = InlineKeyboardMarkup(keyboard)
                 text = f"Приветствую, {user_name}!\n\nГлавное меню:"
 
-                if is_callback:
+                if is_callback and update.callback_query:
                     await update.callback_query.edit_message_text(text, reply_markup=reply_markup)
-                else:
+                elif update.message:
                     await update.message.reply_text(text, reply_markup=reply_markup)
 
         else:
             # Fallback for unknown status
             text = "Статус вашей регистрации неизвестен. Свяжитесь с администратором."
 
-            if is_callback:
+            if is_callback and update.callback_query:
                 await update.callback_query.edit_message_text(text)
-            else:
+            elif update.message:
                 await update.message.reply_text(text)
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /start command - show role-specific menu or registration prompt."""
+    if not update.effective_user:
+        return
     user_id = update.effective_user.id
     user_name = update.effective_user.first_name or "User"
     user_username = update.effective_user.username
@@ -168,6 +170,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Show help information."""
+    if not update.effective_user:
+        return
     user_id = update.effective_user.id
 
     if is_super_admin(user_id):
@@ -201,4 +205,5 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             "• View your statistics\n"
         )
 
-    await update.message.reply_text(help_text, parse_mode="Markdown")
+    if update.message:
+        await update.message.reply_text(help_text, parse_mode="Markdown")
