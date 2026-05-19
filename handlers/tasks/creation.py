@@ -60,6 +60,7 @@ async def create_task(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     await query.answer()
     
     user_id = query.from_user.id
+    logger.debug(f"task creation started for user {user_id}")
     
     # Check if user is registered or is a super admin
     if not user_exists(user_id) and not is_super_admin(user_id):
@@ -119,7 +120,9 @@ async def show_description_step(update: Update, context: ContextTypes.DEFAULT_TY
 
 async def task_title_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Store task name, ask for description."""
-    context.user_data["task_data"]["title"] = update.message.text
+    title_text = update.message.text
+    context.user_data["task_data"]["title"] = title_text
+    logger.debug(f"task title received: {title_text}")
     await show_description_step(update, context, is_query=False)
     return TASK_STEP_DESCRIPTION
 

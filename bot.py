@@ -227,8 +227,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             await super_reject_registration_request_handler(update, context)
 
         # Admin handlers
-        elif data == "admin_create_task" or data == "create_task":
-            return await create_task(update, context)
+        # Task creation is handled by the dedicated ConversationHandler entry point.
         elif data == "admin_view_tasks":
             await admin_view_tasks(update, context)
         elif data == "admin_manage_users":
@@ -503,7 +502,8 @@ def start_bot():
     application.add_handler(edit_task_conv_handler)
     
     # Callback query handler for buttons
-    application.add_handler(CallbackQueryHandler(button_callback))
+    # Use group=1 so ConversationHandlers for task creation and other flows get first priority.
+    application.add_handler(CallbackQueryHandler(button_callback), group=1)
     
     # Schedule deadline reminders (check every 30 minutes)
     job_queue = application.job_queue
