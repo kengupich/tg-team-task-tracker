@@ -9,10 +9,6 @@ import json
 import logging
 import warnings
 from datetime import datetime, timedelta
-from dotenv import load_dotenv
-
-# Load environment variables first
-load_dotenv()
 
 # Import config module for environment settings
 from config import Config
