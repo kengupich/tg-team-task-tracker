@@ -795,7 +795,9 @@ async def cancel_task_creation(update: Update, context: ContextTypes.DEFAULT_TYP
     keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="start_menu")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    context.user_data.clear()
+    """ context.user_data.clear() """
+    if "task_data" in context.user_data:
+        del context.user_data["task_data"]
     await query.edit_message_text("❌ Создание задания отменено.", reply_markup=reply_markup)
-    
+    return ConversationHandler.END
 
