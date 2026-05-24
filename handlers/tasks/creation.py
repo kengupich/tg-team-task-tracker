@@ -69,9 +69,9 @@ async def create_task(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     logger.debug(f"task creation started for user {user_id}")
     
     # Check if user is registered, group admin, or super admin
-    if not user_exists(user_id) and not is_super_admin(user_id) and not is_group_admin(user_id):
+    """ if not user_exists(user_id) and not is_super_admin(user_id) and not is_group_admin(user_id):
         await query.edit_message_text("⚠️ Вы не зарегистрированы в системе.")
-        return ConversationHandler.END
+        return ConversationHandler.END """
     
     # Get user's group (if they have one)
     user_group_id = None

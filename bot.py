@@ -308,7 +308,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             await user_stats(update, context)
 
         else:
-            logger.info(f"Невідомий хенлдер від користувача {user_id}")
             await query.answer()
         
         # Log total time
