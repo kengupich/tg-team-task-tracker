@@ -72,13 +72,13 @@ async def create_task(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         return ConversationHandler.END
     
     # Get user's group (if they have one)
-    user_group_id = None
-    if is_group_admin(user_id):
+    user_group_id = 1
+    """ if is_group_admin(user_id):
         user_group_id = get_user_group_id(user_id)
     else:
         user = get_user_by_id(user_id)
         if user and user.get('group_id'):
-            user_group_id = user['group_id']
+            user_group_id = user['group_id'] """
     
     context.user_data["task_data"] = {
         "admin_id": user_id,  # Creator of the task
