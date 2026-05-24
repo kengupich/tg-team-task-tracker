@@ -55,15 +55,19 @@ async def show_title_step(update: Update, context: ContextTypes.DEFAULT_TYPE, is
 
 
 async def create_task(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Start task creation process - available for all registered users and super admins."""
+    """Start task creation process - available for all registered users, group admins, and super admins."""
     query = update.callback_query
+    if not query:
+        logger.warning("create_task called without callback_query")
+        return ConversationHandler.END
+    
     await query.answer()
     
     user_id = query.from_user.id
     logger.debug(f"task creation started for user {user_id}")
     
-    # Check if user is registered or is a super admin
-    if not user_exists(user_id) and not is_super_admin(user_id):
+    # Check if user is registered, group admin, or super admin
+    if not user_exists(user_id) and not is_super_admin(user_id) and not is_group_admin(user_id):
         await query.edit_message_text("⚠️ Вы не зарегистрированы в системе.")
         return ConversationHandler.END
     

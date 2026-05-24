@@ -105,10 +105,14 @@ logger = logging.getLogger(__name__)
 
 # Use config for settings
 TOKEN = Config.TELEGRAM_BOT_TOKEN
+assert TOKEN, "TELEGRAM_BOT_TOKEN must be set in environment"
+assert isinstance(TOKEN, str), "TELEGRAM_BOT_TOKEN must be a string"
 # Parse super admin IDs from comma-separated string
-SUPER_ADMIN_IDS = [
-    int(id.strip()) for id in Config.SUPER_ADMIN_ID.split(",") if id.strip()
-]
+SUPER_ADMIN_IDS = []
+if Config.SUPER_ADMIN_ID:
+    SUPER_ADMIN_IDS = [
+        int(id.strip()) for id in Config.SUPER_ADMIN_ID.split(",") if id.strip()
+    ]
 
 # Conversation states (only those NOT imported from handlers)
 # Note: TASK_STEP_* states are imported from handlers.tasks
@@ -128,11 +132,25 @@ except Exception as e:
 
 
 # ============================================================================
-async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int | None:
     """Handle inline button callbacks."""
     import time
     query = update.callback_query
+    
+    # Ensure callback_query exists
+    if not query:
+        logger.warning("Received button callback without callback_query")
+        return None
+    
+    assert query is not None  # Type guard for type checker
     data = query.data
+    
+    # Ensure callback data exists
+    if not data:
+        logger.warning("Received callback without data")
+        return None
+    
+    assert isinstance(data, str)  # Type guard for data
     start_time = time.time()
     user_id = query.from_user.id
     
@@ -327,7 +345,8 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 def start_bot():
     """Start the bot."""
     # Enable concurrent updates for faster webhook processing
-    application = Application.builder().token(TOKEN).concurrent_updates(True).build()
+    from typing import cast
+    application = Application.builder().token(cast(str, TOKEN)).concurrent_updates(True).build()
     
     # Command handlers
     application.add_handler(CommandHandler("start", start))
@@ -349,7 +368,6 @@ def start_bot():
                 CallbackQueryHandler(task_back_to_description, pattern="^task_back_to_description$"),
                 CallbackQueryHandler(task_forward_to_time, pattern="^task_forward_to_time$"),
                 CallbackQueryHandler(cancel_task_creation, pattern="^cancel_task_creation$"),
-                CallbackQueryHandler(lambda u, c: u.callback_query.answer(), pattern="^cal_ignore$"),
             ],
             TASK_STEP_TIME: [
                 CallbackQueryHandler(task_time_selected, pattern="^time_select_.*$"),
@@ -416,7 +434,6 @@ def start_bot():
         states={
             WAITING_GROUP_SELECT: [
                 CallbackQueryHandler(super_user_select_group, pattern="^super_user_select_group_.*"),
-                CallbackQueryHandler(lambda u, c: None, pattern="^super_manage_users$"),
             ],
             USER_ID_INPUT: [MessageHandler(filters.TEXT & ~filters.COMMAND, super_user_id_input)],
             USER_NAME_INPUT: [MessageHandler(filters.TEXT & ~filters.COMMAND, super_user_name_input)],
@@ -507,7 +524,8 @@ def start_bot():
     
     # Schedule deadline reminders (check every 30 minutes)
     job_queue = application.job_queue
-    job_queue.run_repeating(send_deadline_reminder, interval=1800, first=10)  # 1800 seconds = 30 minutes
+    if job_queue:
+        job_queue.run_repeating(send_deadline_reminder, interval=1800, first=10)  # 1800 seconds = 30 minutes
     
     # Start in debug or production mode
     config_info = Config.get_info()
